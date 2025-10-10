@@ -56,5 +56,5 @@ if __name__ == "__main__":
     common_code, wrapper_code = extract_header_code(common_path, wrapper_path)
     print("Code extrait du fichier commun:")
     print(common_code)
-    print("\nCode extrait du fichier wrapper:")
+    print("\nExtracted code from wrapper file:")
     print(wrapper_code)

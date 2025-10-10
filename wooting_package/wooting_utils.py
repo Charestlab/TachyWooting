@@ -7,11 +7,13 @@ This module provides utilities for working with Wooting analog keyboards:
 - Keycode conversion and handling
 """
 
-import time
-from interface import lib, ffi
-import pandas as pd
 import os
+import glob
+import json
+import time
 import numpy as np
+import pandas as pd
+from interface import lib, ffi
 
 """
 Character to Keycode Converter Module
@@ -166,51 +168,46 @@ def convert_char_to_keycode(input_values):
         ['0', 98, 2, 1],
         ['.', 99, 1, 1]
     ]
-    
-    if type(input_values) != list :
-        if type(input_values) == str or type(input_values) == int:
+
+    if not isinstance(input_values, list):
+        if isinstance(input_values, (str, int)):
             input_values = [input_values]
         else:
             raise TypeError("Input must be a string, integer, or list of strings/integers.")
+
     
     # Transpose the list for easier access to columns
-    key_names, keycodes, widths, heights = zip(*key_mapping)
-    converted_values = [None] * len(input_values)
+    key_names, keycodes, _, _ = zip(*key_mapping)
+    converted = [None] * len(input_values)
 
     # Process each input value
-    for index, value in enumerate(input_values):
+    for i, val in enumerate(input_values):
         # Handle string input (character to keycode conversion)
-        if isinstance(value, str):
-            value_found = False
-            for key_index, key_name in enumerate(key_names):
-                if key_name.lower() == value.lower():
-                    converted_values[index] = keycodes[key_index]
-                    value_found = True
+        if isinstance(val, str):
+            tgt = val.lower()
+            for k_i, name in enumerate(key_names):
+                if name.lower() == tgt:
+                    converted[i] = keycodes[k_i]
                     break
 
-            if not value_found:
+            else:
                 print("Problem, not finding the input value in the key codes list.")
                 return
 
         # Handle integer input (keycode to character conversion)
-        elif isinstance(value, int):
-            value_found = False
-            for key_index, keycode in enumerate(keycodes):
-                if keycode == value:
-                    converted_values[index] = key_names[key_index]
-                    value_found = True
+        elif isinstance(val, int):
+            for k_i, code in enumerate(keycodes):
+                if code == val:
+                    converted[i] = key_names[k_i]
                     break
-
-            if not value_found:
+            else:
                 print("Problem, not finding the input value in the key codes list.")
                 return
-
-        # Handle invalid input type
         else:
             print('Please use input_values of type char/string or integer')
             return
 
-    return converted_values
+    return converted
 
 def get_data_directory():
     """
@@ -224,51 +221,209 @@ def get_data_directory():
     os.makedirs(base_path, exist_ok=True)
     return base_path
 
-class WOOTING_ACQUISITION():
+
+# ============================================================
+# Multi-format logging helpers
+# ============================================================
+
+_SUPPORTED_FORMATS = {"parquet", "csv", "json", "npy"}
+
+def _ext_from_format(fmt: str) -> str:
+    return {
+        "parquet": "parquet",
+        "csv": "csv",
+        "json": "json",
+        "npy": "npy",
+    }[fmt]
+
+def _df_from_records(records):
+    return pd.DataFrame.from_records(
+        records, columns=["trial", "key", "position", "time_to_threshold"]
+    )
+
+def _write_trial_file(fmt, path, records):
+    """
+    Write ONE per-trial file according to the requested format.
+    Schema: trial, key, position, time_to_threshold
+    """
+    if fmt in ("parquet", "csv"):
+        df = _df_from_records(records)
+        if fmt == "parquet":
+            df.to_parquet(path, index=False)
+        else:
+            df.to_csv(path, index=False)
+    elif fmt == "json":
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False)
+    elif fmt == "npy":
+        arr = np.array(
+            [
+                (int(r["trial"]), int(r["key"]), float(r["position"]), float(r["time_to_threshold"]))
+                for r in records
+            ],
+            dtype=[("trial", "i8"), ("key", "i8"), ("position", "f8"), ("time_to_threshold", "f8")],
+        )
+        np.save(path, arr)
+    else:
+        raise ValueError(f"Unknown format: {fmt}")
+
+def _combine_all_trials(fmt, dirpath, base):
+    """
+    Combine base_trial*.ext into base.ext and delete the trial files.
+    """
+    ext = _ext_from_format(fmt)
+    pattern = os.path.join(dirpath, f"{base}_trial*.{ext}")
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return  # nothing to do
+
+    final_path = os.path.join(dirpath, f"{base}.{ext}")
+
+    if fmt in ("parquet", "csv"):
+        dfs = []
+        for fp in files:
+            if fmt == "parquet":
+                dfs.append(pd.read_parquet(fp))
+            else:
+                dfs.append(pd.read_csv(fp))
+        combined = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(
+            columns=["trial","key","position","time_to_threshold"]
+        )
+        if fmt == "parquet":
+            combined.to_parquet(final_path, index=False)
+        else:
+            combined.to_csv(final_path, index=False)
+
+    elif fmt == "json":
+        all_records = []
+        for fp in files:
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    all_records.extend(data)
+                else:
+                    raise ValueError(f"JSON file is not an array: {fp}")
+        with open(final_path, "w", encoding="utf-8") as f:
+            json.dump(all_records, f, ensure_ascii=False)
+
+    elif fmt == "npy":
+        arrays = [np.load(fp, allow_pickle=False) for fp in files]
+        if arrays:
+            combined = np.concatenate(arrays, axis=0)
+            np.save(final_path, combined)
+
+    for fp in files:
+        try:
+            os.remove(fp)
+        except OSError:
+            pass
+# ============================================================
+# Acquisition class with multi-format logging + merge on uninit
+# ============================================================
+
+_ACTIVE_LOGGERS = set()  # all instances with logging enabled (for global uninit)
+
+class WOOTING_ACQUISITION:
+    """
+    Acquisition manager for Wooting analog keyboards with multi-format logging.
+    """
 
     def __init__(self):
-        self.trial = 0
+        self.trial = 1
+        self.logging_enabled = False
+        self.int_analog = 2  # 1=int (0..255), 2=analog (0..1)
+        self.log_dir = os.getcwd()
+        self.log_base = "wooting_logs"
+        self.log_formats = ["parquet"]  # can be list, e.g. ["csv","json"]
+        # Back-compat attribute:
         self.parquet_tracking = False
-        self.int_analog = False
+        self.parquet_full_path = os.path.join(self.log_dir, f"{self.log_base}.parquet")
+
+    # ---------- Setup logging (new) ----------
+
+    def setup_logging(self, name=None, path=None, int_analog=2, formats="parquet"):
+        """
+        Configure logging.
+        - name: base name or name with extension (e.g., 'tracking.parquet' or 'tracking')
+        - path: directory (defaults to CWD if None)
+        - int_analog: 1 (integer 0..255) or 2 (analog 0..1)
+        - formats: str or list[str] among {'parquet','csv','json','npy'}
+
+        Creates per-trial files: {base}_trial{N}.{ext}
+        """
+        # dir
+        self.log_dir = path if path is not None else os.getcwd()
+        os.makedirs(self.log_dir, exist_ok=True)
+
+        # formats
+        if isinstance(formats, str):
+            formats = [formats]
+        for f in formats:
+            if f not in _SUPPORTED_FORMATS:
+                raise ValueError(f"Unsupported format '{f}'. Choose among {_SUPPORTED_FORMATS}.")
+        self.log_formats = list(dict.fromkeys(formats))  # dedupe, keep order
+
+        # base name (+ optional ext)
+        if name is None:
+            self.log_base = "wooting_logs"
+        else:
+            base, ext = os.path.splitext(name)
+            if ext and ext.lstrip(".") in _SUPPORTED_FORMATS:
+                # name provided with extension -> force that single format
+                self.log_base = base
+                self.log_formats = [ext.lstrip(".")]
+            else:
+                self.log_base = name
+
+        # int/analog mode
+        if int_analog not in (1, 2):
+            raise ValueError("int_analog must be 1 (int) or 2 (analog)")
+        self.int_analog = int_analog
+
+        # back-compat flags/paths
+        self.parquet_tracking = ("parquet" in self.log_formats)
+        self.parquet_full_path = os.path.join(self.log_dir, f"{self.log_base}.parquet")
+
+        self.logging_enabled = True
+        _ACTIVE_LOGGERS.add(self)
+
+    # ---------- Back-compat wrapper (your original API) ----------
 
     def parquet_acquisition(self, name, path, int_analog=1):
         """
-        Initialize parquet file for data logging.
-        
-        Args:
-            name (str): Name of the parquet file
-            path (str, optional): Full path to the directory where the file will be stored.
-                                 If None, uses a 'data' directory in the same folder as the script.
-            int_analog (int): 1 for integer mode, 2 for analog mode
+        Backward compatible initializer (parquet only).
         """
-        self.parquet_tracking = True
-            
-        self.parquet_full_path = os.path.join(path, name)
+        self.setup_logging(name=name, path=path, int_analog=int_analog, formats="parquet")
 
-        if int_analog not in [1, 2]:
-            raise ValueError("int_analog options for position logging must be either 1 (int) or 2 (analog)")
-        self.int_analog = int_analog
-    
-    def _parquet_logs_(self, collected_data):
-        # Convert to DataFrame and append to parquet file
-        df = pd.DataFrame(collected_data, columns=['trial', 'key', 'position', 'time_to_threshold'])
-       
-        # Append mode using fast row group writing
-        if os.path.exists(self.parquet_full_path):
-            existing_df = pd.read_parquet(self.parquet_full_path)
-            combined_df = pd.concat([existing_df, df], ignore_index=True)
-        else:
-            combined_df = df
+    # ---------- Internal helpers ----------
 
-        combined_df.to_parquet(self.parquet_full_path, index=False)
-            
+    def _write_logs_multi_(self, collected_data):
+        """
+        Write *per-trial* logs for every configured format.
+        """
+        for fmt in self.log_formats:
+            ext = _ext_from_format(fmt)
+            trial_path = os.path.join(self.log_dir, f"{self.log_base}_trial{self.trial}.{ext}")
+            _write_trial_file(fmt, trial_path, collected_data)
+
+    def _combine_trials_for_all_formats(self):
+        """
+        Merge trial files into a single file for each configured format.
+        """
+        if not self.logging_enabled:
+            return
+        for fmt in self.log_formats:
+            _combine_all_trials(fmt, self.log_dir, self.log_base)
+
+    # ---------- Acquisition core ----------
+
     def _acquire_raw_values(
         self,
         target_keys,
         threshold=0.1,
         duration_after_threshold=0.5,
         duration_before_threshold=None,
-        sampling_interval=1/8000, # Tachyon mode on best Wooting (60HE v2) has a 8000Hz polling 
+        sampling_interval=1/8000,  # Wooting Tachyon mode up to 8000 Hz
         verbose=False
     ):
         if isinstance(target_keys, list):
@@ -353,7 +508,7 @@ class WOOTING_ACQUISITION():
         sampling_interval=1/8000,
         verbose=False
     ):
-        if self.parquet_tracking and self.int_analog == 1:
+        if self.logging_enabled and self.int_analog == 1:
             raise ValueError("Cannot use acquire_analog_values when logging in integer mode (int_analog=1). Use acquire_integer_values instead.")
 
         collected_data = self._acquire_raw_values(
@@ -365,8 +520,8 @@ class WOOTING_ACQUISITION():
             verbose=verbose
         )
 
-        if self.parquet_tracking and self.int_analog == 2:
-            self._parquet_logs_(collected_data)
+        if self.logging_enabled and self.int_analog == 2:
+            self._write_logs_multi_(collected_data)
 
         self.trial += 1
         return collected_data
@@ -380,7 +535,7 @@ class WOOTING_ACQUISITION():
         sampling_interval=1/8000,
         verbose=False
     ):
-        if self.parquet_tracking and self.int_analog == 2:
+        if self.logging_enabled and self.int_analog == 2:
             raise ValueError("Cannot use acquire_integer_values when logging in analog mode (int_analog=2). Use acquire_analog_values instead.")
 
         collected_data = self._acquire_raw_values(
@@ -395,25 +550,67 @@ class WOOTING_ACQUISITION():
         for d in collected_data:
             d['position'] = round(d['position'] * 255)
 
-        if self.parquet_tracking and self.int_analog == 1:
-            self._parquet_logs_(collected_data)
+        if self.logging_enabled and self.int_analog == 1:
+            self._write_logs_multi_(collected_data)
 
         self.trial += 1
         return collected_data
-        
-def initialize_keyboard(verbose = False):
+
+    # ---------- Optional instance-level init/uninit ----------
+
+    def initialize_keyboard(self, verbose=False):
+        """
+        Initialize Wooting interface (instance helper).
+        """
+        if not lib.wooting_analog_initialise():
+            raise ValueError("Error: Failed to initialize Wooting interface")
+        if not lib.wooting_analog_is_initialised():
+            raise ValueError("Error: Interface not properly initialized")
+
+        device_count = lib.wooting_analog_initialise()
+        if device_count <= 0:
+            raise RuntimeError("No Wooting devices found.")
+
+        buffer = ffi.new("WootingAnalog_DeviceInfo_FFI *[]", device_count)
+        lib.wooting_analog_get_connected_devices_info(buffer, device_count)
+
+        if verbose:
+            device = buffer[0]
+            vendor = f"0x{device.vendor_id:04x}"
+            product = f"0x{device.product_id:04x}"
+            manufacturer = ffi.string(device.manufacturer_name).decode() if device.manufacturer_name else "Unknown"
+            device_name = ffi.string(device.device_name).decode() if device.device_name else "Unknown"
+            print(f"""
+Detected Wooting keyboard:
+    - Vendor ID       : {vendor}
+    - Product ID      : {product}
+    - Device ID       : {device.device_id}
+    - Device Type     : {device.device_type}
+    - Manufacturer    : {manufacturer}
+    - Device Name     : {device_name}
+""")
+        return True
+
+    def uninitialize_keyboard(self):
+        """
+        Uninitialize interface and merge all per-trial logs (for this instance).
+        """
+        try:
+            lib.wooting_analog_uninitialise()
+        finally:
+            self._combine_trials_for_all_formats()
+
+
+# ============================================================
+# Global init/uninit (backward compatible) + active logger merge
+# ============================================================
+
+def initialize_keyboard(verbose=False):
     """
-    Initialize the Wooting keyboard interface.
-    
-    Args:
-        verbose: Enable verbose output with device information
-        
-    Returns:
-        True if initialization successful, False otherwise
+    Initialize the Wooting keyboard interface (global).
     """
     if not lib.wooting_analog_initialise():
         raise ValueError("Error: Failed to initialize Wooting interface")
-    
     if not lib.wooting_analog_is_initialised():
         raise ValueError("Error: Interface not properly initialized")
 
@@ -430,7 +627,6 @@ def initialize_keyboard(verbose = False):
         product = f"0x{device.product_id:04x}"
         manufacturer = ffi.string(device.manufacturer_name).decode() if device.manufacturer_name else "Unknown"
         device_name = ffi.string(device.device_name).decode() if device.device_name else "Unknown"
-        
         print(f"""
 Detected Wooting keyboard:
     - Vendor ID       : {vendor}
@@ -439,29 +635,44 @@ Detected Wooting keyboard:
     - Device Type     : {device.device_type}
     - Manufacturer    : {manufacturer}
     - Device Name     : {device_name}
-    """)
-
+""")
     return True
 
-def uninitialize_keyboard():
-    """Uninitialize the Wooting keyboard interface."""
-    lib.wooting_analog_uninitialise()
 
+def uninitialize_keyboard():
+    """
+    Uninitialize the Wooting keyboard interface (global) and
+    merge all per-trial logs for ALL active loggers, then clear registry.
+    """
+    try:
+        lib.wooting_analog_uninitialise()
+    finally:
+        # Merge for every active logger and clear registry
+        for logger in list(_ACTIVE_LOGGERS):
+            try:
+                logger._combine_trials_for_all_formats()
+            except Exception:
+                pass
+        _ACTIVE_LOGGERS.clear()
+
+
+# ============================================================
+# Quick plotting test (unchanged API)
+# ============================================================
 
 def wooting_plotting_response_test(target_key, reps=10):
-    """Plots the position of time for a key in a certain number of repetitions
-    Args:
-        target_key (list of one character or int): key being tested
-        reps (int, optional): number of repetitions. Defaults to 10.
+    """
+    Plots the position over time for a single key across `reps` repetitions.
     """
     import matplotlib.pyplot as plt
 
-    if type(target_key) != list or len(target_key) > 1:
+    if not (isinstance(target_key, list) and len(target_key) == 1):
         raise ValueError("target_key must be a list of single character or integer for the test")
 
     acqui = WOOTING_ACQUISITION()
-    acqui.parquet_acquisition(path = os.getcwd(), name="tracking.parquet", int_analog=1)
-    
+    # Example: integer logging to CSV; change to your needs
+    acqui.setup_logging(path=os.getcwd(), name="tracking.csv", int_analog=1, formats="csv")
+
     for i in range(reps):
         print(f"\r{i+1} : Press {target_key}")
         data = acqui.acquire_integer_values(duration_before_threshold=0.5, target_keys=target_key)
@@ -474,15 +685,3 @@ def wooting_plotting_response_test(target_key, reps=10):
     plt.title('Key Response Over Time')
     plt.legend()
     plt.savefig("plot.png")
-    
-# Test
-
-#2) Initialize the keyboard    
-initialize_keyboard(verbose=True)
-acqui = WOOTING_ACQUISITION()
-#acqui.parquet_acquisition(path = os.getcwd(), name = "tracking.parquet", int_analog=2)    
-
-wooting_plotting_response_test(target_key=['z'])
-#acqui.acquire_analog_values(target_keys=['z'])
-uninitialize_keyboard()
-

@@ -93,7 +93,7 @@ def get_platform_config():
         compile_args = [
             '/W4', # Warning level for debugging
             '/Zi', # More debugging info
-            '/Od', # A ENLEVER POUR VERSION FINAL, MIEUX POUR DEBUGGER
+            '/Od', # For debugging purposes
         ]
 
         system_libs = [
