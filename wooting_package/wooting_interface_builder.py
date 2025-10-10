@@ -35,9 +35,9 @@ import os
 import platform
 import subprocess
 from cffi import FFI
-from text_extraction import extract_header_code
+from wooting_package.text_extraction import extract_header_code
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+CURRENT_DIR   = os.path.dirname(os.path.abspath(__file__))
 INTERFACE_DIR = os.path.join(CURRENT_DIR, 'interface')
 LIBRARIES_DIR = os.path.join(CURRENT_DIR, 'libraries')
 
@@ -45,133 +45,130 @@ system = platform.system()
 if system == 'Windows':
     SUBLIBRARY_PATH = os.path.join(LIBRARIES_DIR, 'windows')
     SDK_LIBRARY_NAME = "wooting_analog_sdk"
-    WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"  # Necessary on Windows
+    WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
 elif system == 'Darwin':
     SUBLIBRARY_PATH = os.path.join(LIBRARIES_DIR, 'darwin')
-    SDK_LIBRARY_NAME = "wooting_analog_sdk" # Necessary on macOS
+    SDK_LIBRARY_NAME = "wooting_analog_sdk"
     WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
-
 elif system == 'Linux':
     SUBLIBRARY_PATH = os.path.join(LIBRARIES_DIR, 'linux')
     SDK_LIBRARY_NAME = "wooting_analog_sdk"
     WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
-
 else:
     raise NotImplementedError(f"Unsupported platform: {system}")
 
-COMMON_HEADER_FILENAME = "wooting-analog-common.h"
+COMMON_HEADER_FILENAME  = "wooting-analog-common.h"
 WRAPPER_HEADER_FILENAME = "wooting-analog-wrapper.h"
 
+
 def get_platform_config():
-    """Returns platform-specific configuration."""
+    """Returns platform-specific compile/link configuration."""
     if system == 'Darwin':  # macOS
-        #machine = platfcorm.machine()
-        #if machine == 'arm64':
-        #    arch_flags = ['-arch', 'arm64']
-        #elif machine == 'x86_64':
-        #    arch_flags = ['-arch', 'x86_64']
-        #else:
-        #    arch_flags = ['-arch', 'arm64', '-arch', 'x86_64']
+        # Optionnel : verrouiller l’architecture (décommente si utile)
+        # machine = platform.machine()
+        # if machine == 'arm64':
+        #     arch_flags = ['-arch', 'arm64']
+        # elif machine == 'x86_64':
+        #     arch_flags = ['-arch', 'x86_64']
+        # else:
+        #     arch_flags = ['-arch', 'arm64', '-arch', 'x86_64']
 
-        # Simplified compile arguments for macOS
         compile_args = [
-            #*arch_flags,
-            #'-v',                  # Verbose mode — tells the compiler to print detailed information during compilation
-            #'-Wall',                # Enable most common compiler warnings
-            #'-Wextra',              # Extra warnings
-            #'-g',                   # debug infos 
-            #'-O0',                  # Turn off compiler optimizations
-            f'-I{SUBLIBRARY_PATH}', # ACTUALLY NECESSARY
-            #'-target', 'arm64-apple-darwin',
-            #'-march=armv8-a',
-            #'-mtune=native'
+            # *arch_flags,
+            f'-I{SUBLIBRARY_PATH}',  # headers
         ]
-
+        # RPATH relatif : la .so chargera la dylib depuis ../libraries/darwin
+        extra_link_args = [ '-Wl,-rpath,@loader_path/../libraries/darwin' ]
         system_libs = []
 
-    elif system == 'Windows':
-        compile_args = [
-            '/W4', # Warning level for debugging
-            '/Zi', # More debugging info
-            '/Od', # For debugging purposes
-        ]
-
-        system_libs = [
-            'ws2_32',      # Windows Socket API
-            'kernel32',    # Windows Kernel API
-            'advapi32',    # Windows Advanced API
-            'ntdll',       # Windows NT API
-            'bcrypt',      # Windows Cryptography API
-            'userenv'      # Windows User Environment API
-        ]
- 
     elif system == 'Linux':
         compile_args = [
-            '-Wall',
-            '-Wextra',
-            '-g',
-            '-O0',
-            f'-I{SUBLIBRARY_PATH}'
-            ]
-
+            '-Wall', '-Wextra', '-g', '-O0',
+            f'-I{SUBLIBRARY_PATH}',
+        ]
+        # ELF: $ORIGIN ≈ emplacement du binaire chargé
+        extra_link_args = [ '-Wl,-rpath,$ORIGIN/../libraries/linux' ]
         system_libs = []
 
-    else:
-        raise NotImplementedError(f"Unsupported platform: {system}")
+    else:  # Windows
+        compile_args = [
+            '/W4',  # warnings
+            '/Zi',  # debug info
+            '/Od',  # no opt (dev)
+        ]
+        extra_link_args = []  # RPATH non utilisé sous Windows
+        system_libs = [
+            'ws2_32', 'kernel32', 'advapi32', 'ntdll', 'bcrypt', 'userenv'
+        ]
 
     return {
         'compile_args': compile_args,
-        'system_libs': system_libs
+        'extra_link_args': extra_link_args,
+        'system_libs': system_libs,
     }
+
 
 def build_interface():
     """Builds the Python interface for the Wooting Analog SDK."""
-
     print("Building Wooting interface...")
     print(f"Using libraries from: {SUBLIBRARY_PATH}")
 
-    # Check if header files exist
-    common_header_path = os.path.join(SUBLIBRARY_PATH, COMMON_HEADER_FILENAME)
+    # Ensure folders
+    os.makedirs(INTERFACE_DIR, exist_ok=True)
+
+    # Headers presence
+    common_header_path  = os.path.join(SUBLIBRARY_PATH, COMMON_HEADER_FILENAME)
     wrapper_header_path = os.path.join(SUBLIBRARY_PATH, WRAPPER_HEADER_FILENAME)
+    if not os.path.isfile(common_header_path):
+        raise FileNotFoundError(f"Missing header: {common_header_path}")
+    if not os.path.isfile(wrapper_header_path):
+        raise FileNotFoundError(f"Missing header: {wrapper_header_path}")
 
-    # Extract code from header files
+    # Extract C declarations from headers
     common_header_code, wrapper_header_code = extract_header_code(
-        common_header_path,
-        wrapper_header_path
+        common_header_path, wrapper_header_path
     )
-    
-    # Create CFFI builder
-    ffi_builder = FFI()
 
-    # Define C declarations for headers
-    ffi_builder.cdef(common_header_code)
-    ffi_builder.cdef(wrapper_header_code)
+    ffib = FFI()
+    ffib.cdef(common_header_code)
+    ffib.cdef(wrapper_header_code)
 
-    # Get platform-specific configuration
-    platform_config = get_platform_config()
+    cfg = get_platform_config()
 
-    # Configure source and libraries
-    ffi_builder.set_source('wooting_interface',
-        f"""#include <{WRAPPER_HEADER_FILENAME}>
-""",
-        libraries=[SDK_LIBRARY_NAME, WRAPPER_LIBRARY_NAME] + platform_config['system_libs'], # Necessary run utils
-        library_dirs=[SUBLIBRARY_PATH], # Necessary interface
-        extra_compile_args=platform_config['compile_args'], # Necessary to run utils after (darwin)
-        extra_link_args=['-Wl,-rpath,' + SUBLIBRARY_PATH] if system in ('Darwin', 'Linux') else [] # Necessary to build interface (darwin)
+    # Module name kept as 'wooting_interface' (import via: from interface import lib, ffi)
+    ffib.set_source(
+        'wooting_interface',
+        f'#include <{WRAPPER_HEADER_FILENAME}>\n',
+        libraries=[SDK_LIBRARY_NAME, WRAPPER_LIBRARY_NAME] + cfg['system_libs'],
+        library_dirs=[SUBLIBRARY_PATH],
+        extra_compile_args=cfg['compile_args'],
+        extra_link_args=cfg['extra_link_args'],
+    )
+
+    # Compile into the interface/ directory so import path stays the same
+    # cffi place le .so dans le CWD: on se place donc dans INTERFACE_DIR.
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(INTERFACE_DIR)
+        ffib.compile(verbose=True)
+        print("\nInterface compiled successfully!")
+    except Exception as e:
+        print(f"\nCompilation error: {e}")
+        if isinstance(e, subprocess.CalledProcessError) and e.output:
+            print(f"Command output:\n{e.output.decode(errors='ignore')}")
+        raise
+    finally:
+        os.chdir(old_cwd)
+
+    if system == 'Darwin':
+        print(
+            "\n[macOS] Si vous voyez encore 'Library not loaded' ou 'library load disallowed by system policy', "
+            "supprimez la quarantaine et signez ad-hoc la dylib :\n"
+            f'  xattr -dr com.apple.quarantine "{SUBLIBRARY_PATH}"\n'
+            f'  codesign --force --sign - "{os.path.join(SUBLIBRARY_PATH, "libwooting_analog_sdk.dylib")}"\n'
+            "Puis relancez Python."
         )
 
-    try:
-        ffi_builder.compile(verbose=True, tmpdir=INTERFACE_DIR)
-        print("\nInterface compiled successfully!")
-
-    except Exception as e:
-        print(f"\nCompilation error: {str(e)}")
-        if isinstance(e, subprocess.CalledProcessError):
-            print(f"Command output: {e.output.decode() if e.output else 'No output'}")
-        raise
 
 if __name__ == "__main__":
     build_interface()
-    
-    
-    
