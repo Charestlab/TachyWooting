@@ -1,36 +1,36 @@
 """
 Wooting Interface Builder
 
-This scripts build the Python interface for the SDK Wooting Analog using CFFI.
+This script builds the Python interface for the Wooting Analog SDK using CFFI.
+
 Components:
 -----------
 wooting-analog-sdk: The core Analog SDK which handles loading of plugins. This is installed systemwide and is updated separately.
-wooting-analog-common: This library contains all common Analog SDK definitions which are used by every part.
-wooting-analog-plugin-dev: This library contains all common elements needed for designing plugins. This re-exports wooting-analog-common, so it is not required for plugins to separately depend on wooting-analog-common.
-wooting-analog-wrapper: This is the SDK wrapper which is what Applications should use to communicate with the SDK. The linked dll should be shipped with the application using it.
-wooting-analog-test-plugin: Dummy plugin which uses shared memory so other processes can control the output of the plugin. This is used for unit testing of the SDK and allows the wooting-analog-virtual-kb to work.
-wooting-analog-virtual-kb: Virtual Keyboard using GTK which allows to set the analog value of all the keys through the dummy plugin. This allows you to test an Analog SDK implementation without an analog device.
-wooting-analog-sdk-updater: Updater tool to update the Analog SDK from Github releases.
+wooting-analog-common: Common Analog SDK definitions used by all parts.
+wooting-analog-plugin-dev: Common elements needed for designing plugins. This re-exports wooting-analog-common, so plugins do not have to depend on it separately.
+wooting-analog-wrapper: The SDK wrapper used by applications to communicate with the SDK. The linked DLL/dylib/so should be shipped with the application.
+wooting-analog-test-plugin: Dummy plugin using shared memory so other processes can control output (used for unit testing and the virtual keyboard).
+wooting-analog-virtual-kb: Virtual Keyboard (GTK) to set analog values for keys through the dummy plugin — useful for testing without an analog device.
+wooting-analog-sdk-updater: Tool to update the Analog SDK from GitHub releases.
 
 Headers:
 --------
-wooting-analog-wrapper.h: This is the header which includes everything that you need to use the SDK. (This uses wooting-analog-common.h which defines all relevant enums & structs)
-wooting-analog-common.h: This defines all common enums, headers & structs which are needed by plugins & SDK users
-wooting-analog-plugin-dev.h: This includes wooting-analog-common.h & additional functions which are obtained from statically linking to the analog-sdk-common library. (FOR USE WITH PLUGINS)
-plugin.h: This is the header which plugins should use to define all functions that need to be exported for a plugin to work
+wooting-analog-wrapper.h: Includes everything needed to use the SDK (uses wooting-analog-common.h for enums/structs).
+wooting-analog-common.h: Defines common enums/headers/structs needed by plugins and SDK users.
+wooting-analog-plugin-dev.h: Includes wooting-analog-common.h and additional functions from the analog-sdk-common static library (for plugins).
+plugin.h: Header plugins should use to define exported functions.
 
 Dependencies:
 ------------
-- CFFI: For building the Python interface
+- CFFI: to build the Python interface
 - Platform-specific SDK libraries (dll/dylib/so)
 - Platform-specific header files
 
 Usage:
 ------
 Run this script to build the Python interface for the Wooting Analog SDK.
-The script will automatically detect the platform and use the appropriate build settings.
+The script detects the platform and uses the appropriate build settings.
 """
-
 import os
 import platform
 import subprocess
@@ -41,65 +41,61 @@ CURRENT_DIR   = os.path.dirname(os.path.abspath(__file__))
 INTERFACE_DIR = os.path.join(CURRENT_DIR, 'interface')
 LIBRARIES_DIR = os.path.join(CURRENT_DIR, 'libraries')
 
-system = platform.system()
-if system == 'Windows':
-    SUBLIBRARY_PATH = os.path.join(LIBRARIES_DIR, 'windows')
-    SDK_LIBRARY_NAME = "wooting_analog_sdk"
-    WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
-elif system == 'Darwin':
-    SUBLIBRARY_PATH = os.path.join(LIBRARIES_DIR, 'darwin')
-    SDK_LIBRARY_NAME = "wooting_analog_sdk"
-    WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
-elif system == 'Linux':
-    SUBLIBRARY_PATH = os.path.join(LIBRARIES_DIR, 'linux')
-    SDK_LIBRARY_NAME = "wooting_analog_sdk"
-    WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
-else:
-    raise NotImplementedError(f"Unsupported platform: {system}")
 
-COMMON_HEADER_FILENAME  = "wooting-analog-common.h"
-WRAPPER_HEADER_FILENAME = "wooting-analog-wrapper.h"
+def _norm_arch():
+    """Normalize architecture names we care about."""
+    arch = platform.machine().lower()
+    if arch in ("arm64", "aarch64", "arm64e"):
+        return "arm64"
+    if arch in ("x86_64", "amd64"):
+        return "x86_64"
+    # default to arm64 if unknown (safer for Apple Silicon dev)
+    return "arm64"
 
 
-def get_platform_config():
-    """Returns platform-specific compile/link configuration."""
+def get_library_dir():
+    """Return the correct library directory based on platform and architecture."""
+    system = platform.system().lower()  # 'darwin', 'linux', 'windows'
+    base_dir = os.path.join(LIBRARIES_DIR, system)
+
+    if system == "darwin":
+        arch = _norm_arch()
+        return os.path.join(base_dir, arch)  # .../libraries/darwin/arm64 or x86_64
+
+    # linux/windows: no arch subfolder expected
+    return base_dir
+
+
+def get_platform_config(library_dir):
+    """Return platform-specific compile/link configuration."""
+    system = platform.system()
+    arch = _norm_arch()
+
     if system == 'Darwin':  # macOS
-        # Optionnel : verrouiller l’architecture (décommente si utile)
-        # machine = platform.machine()
-        # if machine == 'arm64':
-        #     arch_flags = ['-arch', 'arm64']
-        # elif machine == 'x86_64':
-        #     arch_flags = ['-arch', 'x86_64']
-        # else:
-        #     arch_flags = ['-arch', 'arm64', '-arch', 'x86_64']
-
         compile_args = [
-            # *arch_flags,
-            f'-I{SUBLIBRARY_PATH}',  # headers
+            f'-I{library_dir}',  # headers
         ]
-        # RPATH relatif : la .so chargera la dylib depuis ../libraries/darwin
-        extra_link_args = [ '-Wl,-rpath,@loader_path/../libraries/darwin' ]
+        # rpath must include the arch subfolder so the .so finds the dylibs next to the package
+        extra_link_args = [f'-Wl,-rpath,@loader_path/../libraries/darwin/{arch}']
         system_libs = []
 
     elif system == 'Linux':
         compile_args = [
             '-Wall', '-Wextra', '-g', '-O0',
-            f'-I{SUBLIBRARY_PATH}',
+            f'-I{library_dir}',
         ]
-        # ELF: $ORIGIN ≈ emplacement du binaire chargé
-        extra_link_args = [ '-Wl,-rpath,$ORIGIN/../libraries/linux' ]
+        # ELF: $ORIGIN resolves to the directory of the loaded binary
+        extra_link_args = ['-Wl,-rpath,$ORIGIN/../libraries/linux']
         system_libs = []
 
     else:  # Windows
         compile_args = [
             '/W4',  # warnings
             '/Zi',  # debug info
-            '/Od',  # no opt (dev)
+            '/Od',  # no optimization (dev)
         ]
-        extra_link_args = []  # RPATH non utilisé sous Windows
-        system_libs = [
-            'ws2_32', 'kernel32', 'advapi32', 'ntdll', 'bcrypt', 'userenv'
-        ]
+        extra_link_args = []  # rpath is not used on Windows
+        system_libs = ['ws2_32', 'kernel32', 'advapi32', 'ntdll', 'bcrypt', 'userenv']
 
     return {
         'compile_args': compile_args,
@@ -109,16 +105,25 @@ def get_platform_config():
 
 
 def build_interface():
-    """Builds the Python interface for the Wooting Analog SDK."""
+    """Build the Python interface for the Wooting Analog SDK."""
     print("Building Wooting interface...")
-    print(f"Using libraries from: {SUBLIBRARY_PATH}")
 
-    # Ensure folders
+    library_dir = get_library_dir()
+    print(f"Using libraries from: {library_dir}")
+
+    # Ensure target folder exists
     os.makedirs(INTERFACE_DIR, exist_ok=True)
 
-    # Headers presence
-    common_header_path  = os.path.join(SUBLIBRARY_PATH, COMMON_HEADER_FILENAME)
-    wrapper_header_path = os.path.join(SUBLIBRARY_PATH, WRAPPER_HEADER_FILENAME)
+    # Platform-specific names
+    system = platform.system()
+    SDK_LIBRARY_NAME = "wooting_analog_sdk"
+    WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
+    COMMON_HEADER_FILENAME  = "wooting-analog-common.h"
+    WRAPPER_HEADER_FILENAME = "wooting-analog-wrapper.h"
+
+    # Verify header presence
+    common_header_path  = os.path.join(library_dir, COMMON_HEADER_FILENAME)
+    wrapper_header_path = os.path.join(library_dir, WRAPPER_HEADER_FILENAME)
     if not os.path.isfile(common_header_path):
         raise FileNotFoundError(f"Missing header: {common_header_path}")
     if not os.path.isfile(wrapper_header_path):
@@ -133,20 +138,19 @@ def build_interface():
     ffib.cdef(common_header_code)
     ffib.cdef(wrapper_header_code)
 
-    cfg = get_platform_config()
+    cfg = get_platform_config(library_dir)
 
-    # Module name kept as 'wooting_interface' (import via: from interface import lib, ffi)
+    # Keep the module name 'wooting_interface' (import via: from interface import lib, ffi)
     ffib.set_source(
         'wooting_interface',
         f'#include <{WRAPPER_HEADER_FILENAME}>\n',
         libraries=[SDK_LIBRARY_NAME, WRAPPER_LIBRARY_NAME] + cfg['system_libs'],
-        library_dirs=[SUBLIBRARY_PATH],
+        library_dirs=[library_dir],
         extra_compile_args=cfg['compile_args'],
         extra_link_args=cfg['extra_link_args'],
     )
 
-    # Compile into the interface/ directory so import path stays the same
-    # cffi place le .so dans le CWD: on se place donc dans INTERFACE_DIR.
+    # CFFI writes the .so into the current working directory: switch to INTERFACE_DIR
     old_cwd = os.getcwd()
     try:
         os.chdir(INTERFACE_DIR)
@@ -159,16 +163,18 @@ def build_interface():
         raise
     finally:
         os.chdir(old_cwd)
-
+    
+    """
     if system == 'Darwin':
+        # Helpful note for local/dev setups affected by Gatekeeper quarantine
         print(
-            "\n[macOS] Si vous voyez encore 'Library not loaded' ou 'library load disallowed by system policy', "
-            "supprimez la quarantaine et signez ad-hoc la dylib :\n"
-            f'  xattr -dr com.apple.quarantine "{SUBLIBRARY_PATH}"\n'
-            f'  codesign --force --sign - "{os.path.join(SUBLIBRARY_PATH, "libwooting_analog_sdk.dylib")}"\n'
-            "Puis relancez Python."
+            "\n[macOS] If you still see 'Library not loaded' or 'library load disallowed by system policy', "
+            "remove quarantine and ad-hoc sign the dylib:\n"
+            f'  xattr -dr com.apple.quarantine "{library_dir}"\n'
+            f'  codesign --force --sign - "{os.path.join(library_dir, "libwooting_analog_sdk.dylib")}"\n'
+            "Then restart Python. For distribution, consider signed & notarized wheels."
         )
-
-
+    """
+    
 if __name__ == "__main__":
     build_interface()

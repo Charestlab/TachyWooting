@@ -13,7 +13,9 @@ import json
 import time
 import numpy as np
 import pandas as pd
-from interface import lib, ffi
+
+from wooting_package.interface import lib, ffi
+import shutil
 
 """
 Character to Keycode Converter Module
@@ -211,11 +213,7 @@ def convert_char_to_keycode(input_values):
 
 def get_data_directory():
     """
-    Get the data directory path based on the operating system.
-    Creates the directory if it doesn't exist.
-    
-    Returns:
-        str: Path to the data directory
+    Return a data directory next to this file (create if missing).
     """
     base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
     os.makedirs(base_path, exist_ok=True)
@@ -238,7 +236,7 @@ def _ext_from_format(fmt: str) -> str:
 
 def _df_from_records(records):
     return pd.DataFrame.from_records(
-        records, columns=["trial", "key", "position", "time_to_threshold"]
+        records, columns=["trial", "key", "position", "time_to_threshold", "time_abs"]
     )
 
 def _write_trial_file(fmt, path, records):
@@ -267,17 +265,20 @@ def _write_trial_file(fmt, path, records):
     else:
         raise ValueError(f"Unknown format: {fmt}")
 
-def _combine_all_trials(fmt, dirpath, base):
+def _combine_all_trials(fmt, staging_dir, final_dir, base):
     """
-    Combine base_trial*.ext into base.ext and delete the trial files.
+    Combine all {staging_dir}/{base}_trial*.ext into {final_dir}/{base}.ext
+    and delete the per-trial files. Removes the staging dir if empty.
+    After combining, also deletes the combined file in the staging directory if it exists.
     """
     ext = _ext_from_format(fmt)
-    pattern = os.path.join(dirpath, f"{base}_trial*.{ext}")
+    pattern = os.path.join(staging_dir, f"{base}_trial*.{ext}")
     files = sorted(glob.glob(pattern))
     if not files:
         return  # nothing to do
 
-    final_path = os.path.join(dirpath, f"{base}.{ext}")
+    os.makedirs(final_dir, exist_ok=True)
+    final_path = os.path.join(final_dir, f"{base}.{ext}")
 
     if fmt in ("parquet", "csv"):
         dfs = []
@@ -287,7 +288,7 @@ def _combine_all_trials(fmt, dirpath, base):
             else:
                 dfs.append(pd.read_csv(fp))
         combined = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(
-            columns=["trial","key","position","time_to_threshold"]
+            columns=["trial", "key", "position", "time_to_threshold", "time_abs"]
         )
         if fmt == "parquet":
             combined.to_parquet(final_path, index=False)
@@ -312,11 +313,29 @@ def _combine_all_trials(fmt, dirpath, base):
             combined = np.concatenate(arrays, axis=0)
             np.save(final_path, combined)
 
+    # Cleanup per-trial files
     for fp in files:
         try:
             os.remove(fp)
         except OSError:
             pass
+
+    # Remove the staging directory if now empty
+    try:
+        if not os.listdir(staging_dir):
+            os.rmdir(staging_dir)
+    except OSError:
+        pass
+
+    # Delete the combined file in the staging directory if it exists
+    staging_combined_path = os.path.join(staging_dir, f"{base}.{ext}")
+    if os.path.isfile(staging_combined_path):
+        try:
+            os.remove(staging_combined_path)
+        except OSError:
+            pass
+
+
 # ============================================================
 # Acquisition class with multi-format logging + merge on uninit
 # ============================================================
@@ -332,12 +351,33 @@ class WOOTING_ACQUISITION:
         self.trial = 1
         self.logging_enabled = False
         self.int_analog = 2  # 1=int (0..255), 2=analog (0..1)
-        self.log_dir = os.getcwd()
+        self.log_dir = os.getcwd()      # final output directory
         self.log_base = "wooting_logs"
         self.log_formats = ["parquet"]  # can be list, e.g. ["csv","json"]
-        # Back-compat attribute:
-        self.parquet_tracking = False
-        self.parquet_full_path = os.path.join(self.log_dir, f"{self.log_base}.parquet")
+
+        # Number of digits for zero-padding trial numbers (e.g., 0001)
+        self.trial_pad = 4
+
+        # Final outputs per enabled format, e.g. {"csv": ".../tracking.csv"}
+        self.output_paths = {}
+
+        # Staging directory where per-trial files are written
+        self.staging_dir = None
+
+        # Deprecated compatibility shim (parquet_full_path)
+        self._deprecated_warned = False    
+
+    # --- Deprecated property kept for backward compatibility ---
+
+    @property
+    def parquet_full_path(self):
+        # Replaced warning with a hard failure as requested
+        raise ValueError("parquet_full_path is deprecated; use output_paths.get('parquet').")
+
+    @parquet_full_path.setter
+    def parquet_full_path(self, value):
+        # Replaced warning with a hard failure as requested
+        raise ValueError("Setting parquet_full_path is deprecated; set output_paths['parquet'] instead.")
 
     # ---------- Setup logging (new) ----------
 
@@ -349,13 +389,16 @@ class WOOTING_ACQUISITION:
         - int_analog: 1 (integer 0..255) or 2 (analog 0..1)
         - formats: str or list[str] among {'parquet','csv','json','npy'}
 
-        Creates per-trial files: {base}_trial{N}.{ext}
+        Creates per-trial files in a staging folder:
+            {log_dir}/{log_base}_trials/{base}_trial{N}.{ext}
+        On uninitialize, all trials are merged into:
+            {log_dir}/{log_base}.{ext}
         """
-        # dir
+        # Final output directory
         self.log_dir = path if path is not None else os.getcwd()
         os.makedirs(self.log_dir, exist_ok=True)
 
-        # formats
+        # Formats
         if isinstance(formats, str):
             formats = [formats]
         for f in formats:
@@ -363,7 +406,7 @@ class WOOTING_ACQUISITION:
                 raise ValueError(f"Unsupported format '{f}'. Choose among {_SUPPORTED_FORMATS}.")
         self.log_formats = list(dict.fromkeys(formats))  # dedupe, keep order
 
-        # base name (+ optional ext)
+        # Base name (+ optional ext)
         if name is None:
             self.log_base = "wooting_logs"
         else:
@@ -375,45 +418,46 @@ class WOOTING_ACQUISITION:
             else:
                 self.log_base = name
 
+        # Final outputs per format
+        self.output_paths = {
+            fmt: os.path.join(self.log_dir, f"{self.log_base}.{fmt}") for fmt in self.log_formats
+        }
+
+        # Staging directory for per-trial files
+        self.staging_dir = os.path.join(self.log_dir, f"{self.log_base}_trials")
+        os.makedirs(self.staging_dir, exist_ok=True)
+
         # int/analog mode
         if int_analog not in (1, 2):
             raise ValueError("int_analog must be 1 (int) or 2 (analog)")
         self.int_analog = int_analog
 
-        # back-compat flags/paths
-        self.parquet_tracking = ("parquet" in self.log_formats)
-        self.parquet_full_path = os.path.join(self.log_dir, f"{self.log_base}.parquet")
-
         self.logging_enabled = True
         _ACTIVE_LOGGERS.add(self)
-
-    # ---------- Back-compat wrapper (your original API) ----------
-
-    def parquet_acquisition(self, name, path, int_analog=1):
-        """
-        Backward compatible initializer (parquet only).
-        """
-        self.setup_logging(name=name, path=path, int_analog=int_analog, formats="parquet")
 
     # ---------- Internal helpers ----------
 
     def _write_logs_multi_(self, collected_data):
         """
-        Write *per-trial* logs for every configured format.
+        Write exactly one per-trial file (per enabled format) into the staging folder.
         """
         for fmt in self.log_formats:
             ext = _ext_from_format(fmt)
-            trial_path = os.path.join(self.log_dir, f"{self.log_base}_trial{self.trial}.{ext}")
+            trial_path = os.path.join(
+                self.staging_dir,
+                f"{self.log_base}_trial{self.trial:0{self.trial_pad}d}.{ext}"
+            )
             _write_trial_file(fmt, trial_path, collected_data)
 
     def _combine_trials_for_all_formats(self):
         """
-        Merge trial files into a single file for each configured format.
+        Combine per-trial files from the staging folder into one file per format,
+        then delete per-trial files and remove the staging folder if empty.
         """
-        if not self.logging_enabled:
+        if not self.logging_enabled or not self.staging_dir:
             return
         for fmt in self.log_formats:
-            _combine_all_trials(fmt, self.log_dir, self.log_base)
+            _combine_all_trials(fmt, self.staging_dir, self.log_dir, self.log_base)
 
     # ---------- Acquisition core ----------
 
@@ -452,7 +496,6 @@ class WOOTING_ACQUISITION:
         while True:
             current_time_ns = time.time_ns()
             snapshot = []
-
             for code in target_keys:
                 value = lib.wooting_analog_read_analog(code)
                 snapshot.append({'time_ns': current_time_ns, 'key': code, 'position': value})
@@ -474,12 +517,12 @@ class WOOTING_ACQUISITION:
                         'trial': self.trial,
                         'key': s['key'],
                         'position': s['position'],
-                        'time_to_threshold': (s['time_ns'] - trigger_time_ns) / 1e9
+                        'time_to_threshold': (s['time_ns'] - trigger_time_ns) / 1e9,
+                        'time_abs': (s['time_ns']/10**9)
                     })
-
+                
                 if (current_time_ns - trigger_time_ns) / 1e9 >= duration_after_threshold:
                     break
-
             time.sleep(sampling_interval)
 
         for s in buffer_pre_threshold:
@@ -489,14 +532,12 @@ class WOOTING_ACQUISITION:
                     'trial': self.trial,
                     'key': s['key'],
                     'position': s['position'],
-                    'time_to_threshold': time_to_threshold
+                    'time_to_threshold': time_to_threshold,
+                    'time_abs': (s['time_ns']/10**9)
                 })
-
         collected_data.sort(key=lambda x: x['time_to_threshold'])
-
         if verbose:
             print(f"\nAcquisition complete ({len(collected_data)} samples captured).")
-
         return collected_data
 
     def acquire_analog_values(
@@ -519,7 +560,6 @@ class WOOTING_ACQUISITION:
             sampling_interval=sampling_interval,
             verbose=verbose
         )
-
         if self.logging_enabled and self.int_analog == 2:
             self._write_logs_multi_(collected_data)
 
@@ -546,7 +586,6 @@ class WOOTING_ACQUISITION:
             sampling_interval=sampling_interval,
             verbose=verbose
         )
-
         for d in collected_data:
             d['position'] = round(d['position'] * 255)
 
@@ -657,31 +696,48 @@ def uninitialize_keyboard():
 
 
 # ============================================================
-# Quick plotting test (unchanged API)
+# Maintenance helpers
 # ============================================================
 
-def wooting_plotting_response_test(target_key, reps=10):
+def delete_interface():
     """
-    Plots the position over time for a single key across `reps` repetitions.
+    Deletes every file starting with 'wooting_interface' in the interface directory.
+    Also cleans local __pycache__, plot.png, tracking.csv, and egg-info at project root.
     """
-    import matplotlib.pyplot as plt
+    interface_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "interface")
+    pattern = os.path.join(interface_dir, "wooting_interface*")
+    files = glob.glob(pattern)
+    for file_path in files:
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+    # Delete __pycache__ directories in wooting_package and wooting_package/interface
+    for pycache_dir in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "__pycache__"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "interface", "__pycache__")
+    ]:
+        if os.path.isdir(pycache_dir):
+            try:
+                shutil.rmtree(pycache_dir)
+            except Exception:
+                pass
+    # Delete "plot.png" and "tracking.csv" in the parent directory of wooting_package
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for filename in ["plot.png", "tracking.csv"]:
+        file_path = os.path.join(parent_dir, filename)
+        if os.path.isfile(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
 
-    if not (isinstance(target_key, list) and len(target_key) == 1):
-        raise ValueError("target_key must be a list of single character or integer for the test")
-
-    acqui = WOOTING_ACQUISITION()
-    # Example: integer logging to CSV; change to your needs
-    acqui.setup_logging(path=os.getcwd(), name="tracking.csv", int_analog=1, formats="csv")
-
-    for i in range(reps):
-        print(f"\r{i+1} : Press {target_key}")
-        data = acqui.acquire_integer_values(duration_before_threshold=0.5, target_keys=target_key)
-        times = [d['time_to_threshold'] for d in data]
-        positions = [d['position'] for d in data]
-        plt.plot(times, positions, label=f'Trial {i+1}')
-
-    plt.xlabel('Time to Threshold (s)')
-    plt.ylabel('Position')
-    plt.title('Key Response Over Time')
-    plt.legend()
-    plt.savefig("plot.png")
+    # Delete "<project_root>/wooting_interface.egg-info" directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    egg_info_dir = os.path.join(project_root, "wooting_interface.egg-info")
+    if os.path.isdir(egg_info_dir):
+        try:
+            shutil.rmtree(egg_info_dir)
+        except Exception:
+            pass
+#delete_interface()

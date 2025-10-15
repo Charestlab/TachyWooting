@@ -2,6 +2,8 @@
 
 A Python interface for the Wooting Analog SDK that enables reading analog key values and managing keyboard events. This library provides a high-level Python wrapper around the Wooting Analog SDK, making it easy to integrate analog keyboard support into Python applications.
 
+---
+
 ## Features
 
 - Read analog key values (0.0 to 1.0 range) or integers (0 to 255 range)
@@ -14,8 +16,10 @@ A Python interface for the Wooting Analog SDK that enables reading analog key va
 ## Installation
 
 ```bash
-pip install -r recquirements.txt
+pip install -e .
 ```
+
+---
 
 ## Project Structure
 
@@ -30,11 +34,33 @@ wooting-keyboard/
     ├── interface
         ├── ...                         # Built interface
         └── __init__.py 
-    └── librairies                      # [Wooting components and headers](https://github.com/WootingKb/wooting-analog-sdk/releases) 
+    ├── librairies                      # [Wooting components and headers](https://github.com/WootingKb/wooting-analog-sdk/releases) 
         ├── darwin
         ├── linux
         └── windows
+    └── permissions
+        ├── PERMISSIONS_linux.sh
+        └── PERMISSIONS_linux.sh
 ```
+---
+
+## Permissions (macOS & Linux)
+
+Scripts are provided in the `permissions/` folder:
+
+- **PERMISSIONS_mac.sh** and **PERMISSIONS_linux.sh**  
+  These scripts set the correct permissions on native libraries (`.dylib`/`.so`) required by the Wooting SDK.  
+  On Linux, the script ensures your user has access to the USB port connected to the keyboard, which is necessary for communication with the device.  
+  Run the appropriate script for your OS after cloning the project to avoid library loading errors.
+
+---
+
+## Automatic Initialization
+
+The `wooting_package/__init__.py` file automatically initializes the Wooting interface when you import the package.  
+You can use the main functions and classes directly without manual initialization.
+
+---
 
 ## Usage
 
@@ -61,11 +87,11 @@ Example values:
 #### Integer values function
 A function has been made to make the conversion automatically.
 
-```from wooting_utils import WOOTING_ACQUISITION()
+```f
+rom wooting_utils import WOOTING_ACQUISITION()
 
 acquisition = WOOTING_ACQUISITION()
 acquisition.acquire_integer_values(target_key=['1'])
-acquire_integer_values()
 
 ```
 
@@ -90,6 +116,45 @@ Acquire analog values and convert to integers (0-255).
 
 ### `parquet_acquisition(name, path, int_analog)`
 Will log the pressed keys in a .parquet file.
+The package exposes the following key components:
+
+- **WOOTING_ACQUISITION**  
+  Main class for acquiring analog or integer key values from your Wooting keyboard.  
+  Handles logging, acquisition, and interface management.
+
+  - **initialize_keyboard(verbose=False)**  
+    Initializes the Wooting interface and prints device info.  
+    This is essential before any acquisition to ensure the keyboard is detected and ready.
+
+  - **uninitialize_keyboard()**  
+    Uninitializes the interface and merges temporary log files.  
+    Always call this when done to properly close the connection and save logs.
+
+  - **acquire_analog_values(target_keys, threshold, duration_after_threshold, ...)**  
+    Acquires analog values (0.0–1.0) for specified keys around threshold crossing.
+
+  - **acquire_integer_values(target_keys, threshold, duration_after_threshold, ...)**  
+    Acquires analog values and converts them to integers (0–255).
+
+  - **setup_logging(name=None, path=None, int_analog=2, formats="parquet")**  
+    Configures logging for your acquisitions.  
+    Allows you to specify the log file name, output directory, analog/int mode, and file formats (`parquet`, `csv`, `json`, `npy`).  
+    Creates per-trial files in a staging folder and merges them into a single file on uninitialization.
+
+- **convert_char_to_keycode**  
+  Utility function to convert a character or key name to its HID keycode (and vice versa).
+
+- **lib**  
+  CFFI object exposing native functions from the Wooting Analog SDK.
+
+- **ffi**  
+  CFFI object for managing native buffers and structures.
+
+- **build_interface**  
+  Function to rebuild the C interface if you modify the source files.
+
+- **delete_interface**  
+  Utility function to clean up generated interface files and caches.
 
 ### Error Codes
 
@@ -132,34 +197,21 @@ The SDK supports multiple keycode modes that can be set using `wooting_analog_se
 - Supports HID and ScanCode1 modes
 - Uses dylib files for libraries
 
-## Example
-
-```python
-from wooting_utils import initialize_keyboard, acquire_analog_values, uninitialize_keyboard
-
-# Initialize the keyboard
-initialize_keyboard()
-
-acquisition_obj = WOOTING_ACQUISITION()
-print(acquisition_obj.acquire_integer_values())
-
-uninitialize_keyboard()
-```
-
 ## Example + logging in parquet :
 
 ```python
-from wooting_utils import initialize_keyboard, acquire_analog_values, uninitialize_keyboard
+from wooting_package import WOOTING_ACQUISITION
 
-initialize_keyboard()
+acq = WOOTING_ACQUISITION()
+acq.initialize_keyboard()
+acqu.setup_logging(path=os.getcwd(), name="tracking.csv", int_analog=1, formats="csv")
+acq.acquire_integer_values(target_keys=['A'])
+acq.uninitialize_keyboard()
 
-acquisition_obj = WOOTING_ACQUISITION()
-
-acquisition_obj.parquet_acquisition("FOLDER", "YOUR_FILE.parquet")    
-acquisition_obj.acquire_integer_values()
-
-uninitialize_keyboard()
 ```
+
+This initializes the interface, acquires integer values for the "A" key, and then properly closes the connection.
+
 ## Contributing
 
 Feel free to submit issues and enhancement requests!

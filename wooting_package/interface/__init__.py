@@ -1,9 +1,12 @@
-"""
-Wooting Interface Package
+import importlib
 
-Ce package fournit une interface Python pour le SDK Wooting Analog.
-"""
+try:
+    # Import the compiled CFFI module (the .so/.pyd file)
+    _wooting_interface = importlib.import_module("wooting_package.interface.wooting_interface")
+    lib = _wooting_interface.lib
+    ffi = _wooting_interface.ffi
+except ModuleNotFoundError:
+    lib = None
+    ffi = None
 
-from .wooting_interface import *
-
-__all__ = ['lib', 'ffi']
+__all__ = ["lib", "ffi"]
