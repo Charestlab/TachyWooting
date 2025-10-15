@@ -97,27 +97,6 @@ acquisition.acquire_integer_values(target_key=['1'])
 
 ### Key Functions
 
-#### `initialize_keyboard(verbose=False)`
-Initialize the Wooting keyboard interface and optionally display device information.
-
-#### `uninitialize_keyboard()`
-Clean up and uninitialize the keyboard interface.
-
-##### `wooting_plotting_response_test()`
-Simple plot of position over time for a number of repetitions.
-
-#### class WOOTING_ACQUISITION : 
-
-#### `acquire_analog_values(target_keys, threshold, duration_after_threshold, ...)`
-Acquire analog values for specified keys around threshold crossing.
-
-#### `acquire_integer_values(target_keys, threshold, duration_after_threshold, ...)`
-Acquire analog values and convert to integers (0-255).
-
-### `parquet_acquisition(name, path, int_analog)`
-Will log the pressed keys in a .parquet file.
-The package exposes the following key components:
-
 - **WOOTING_ACQUISITION**  
   Main class for acquiring analog or integer key values from your Wooting keyboard.  
   Handles logging, acquisition, and interface management.
