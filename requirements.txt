@@ -3,4 +3,4 @@ numpy
 matplotlib
 cffi
 setuptools
-pyarrow
+hdf5

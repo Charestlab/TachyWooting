@@ -67,7 +67,7 @@ def _apply_macos_gatekeeper():
             subprocess.run(["codesign", "--force", "--sign", "-", str(sdk_path)], check=False)
         if wrapper_path.exists():
             subprocess.run(["codesign", "--force", "--sign", "-", str(wrapper_path)], check=False)
-
+        print("\n")
     except Exception as e:
         # Never hard-fail here; keep import working and just inform.
         print(f"[Wooting][macOS] Gatekeeper step skipped: {e}")
@@ -94,7 +94,7 @@ def _run_permissions_if_needed() -> None:
             subprocess.run(["/bin/bash", _PERM_LINUX_SH], check=True, cwd=_PKG_DIR)
         except Exception as e:
             print(f"[Wooting] Linux permission setup skipped (script error): {e}")
-
+    print("\n")
     # Windows or missing script: silently skip
 
 # 1) Run permissions (only if not compiled yet)

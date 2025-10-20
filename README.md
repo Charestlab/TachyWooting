@@ -31,6 +31,7 @@ wooting-keyboard/
     ├── text_extraction.py
     ├── wooting_interface_builder.py
     ├── wooting_utils.py
+    ├── visualize.py           # quick HDF5 visualizer
     ├── interface
         ├── ...                         # Built interface
         └── __init__.py 
@@ -57,8 +58,8 @@ Scripts are provided in the `permissions/` folder:
 
 ## Automatic Initialization
 
-The `wooting_package/__init__.py` file automatically initializes the Wooting interface when you import the package.  
-You can use the main functions and classes directly without manual initialization.
+Importing the package triggers initialization behavior via `wooting_package/__init__.py`. The package attempts to prepare the CFFI interface so that `lib` / `ffi` are available. You can still call initialization explicitly via the acquisition class methods (recommended to verify the device).
+
 
 ---
 
@@ -87,8 +88,8 @@ Example values:
 #### Integer values function
 A function has been made to make the conversion automatically.
 
-```f
-rom wooting_utils import WOOTING_ACQUISITION()
+```
+from wooting_utils import WOOTING_ACQUISITION()
 
 acquisition = WOOTING_ACQUISITION()
 acquisition.acquire_integer_values(target_key=['1'])
@@ -97,6 +98,32 @@ acquisition.acquire_integer_values(target_key=['1'])
 
 ### Key Functions
 
+<<<<<<< HEAD
+=======
+#### `initialize_keyboard(verbose=False)`
+Initialize the Wooting keyboard interface and optionally display device information.
+
+#### `uninitialize_keyboard()`
+Clean up and uninitialize the keyboard interface.
+
+##### `wooting_plotting_response_test()`
+Simple plot of position over time for a number of repetitions.
+
+#### class WOOTING_ACQUISITION : 
+
+#### `acquire_analog_values(target_keys, threshold, duration_after_threshold, ...)`
+Acquire analog values for specified keys around threshold crossing.
+
+#### `acquire_integer_values(target_keys, threshold, duration_after_threshold, ...)`
+Acquire analog values and convert to integers (0-255).
+
+### `setup_logging(name, path, int_analog)`
+Configure logging (name and folder, int/analog mode). Creates staging directory for per-trial shards and registers the logger for automatic merge on uninit.
+
+
+The package exposes the following key components:
+
+>>>>>>> 4ad13f9 (changes)
 - **WOOTING_ACQUISITION**  
   Main class for acquiring analog or integer key values from your Wooting keyboard.  
   Handles logging, acquisition, and interface management.
@@ -117,7 +144,7 @@ acquisition.acquire_integer_values(target_key=['1'])
 
   - **setup_logging(name=None, path=None, int_analog=2, formats="parquet")**  
     Configures logging for your acquisitions.  
-    Allows you to specify the log file name, output directory, analog/int mode, and file formats (`parquet`, `csv`, `json`, `npy`).  
+    Allows you to specify the log file name, output directory, analog/int mode.  
     Creates per-trial files in a staging folder and merges them into a single file on uninitialization.
 
 - **convert_char_to_keycode**  
@@ -134,6 +161,31 @@ acquisition.acquire_integer_values(target_key=['1'])
 
 - **delete_interface**  
   Utility function to clean up generated interface files and caches.
+
+---
+
+## HDF5 layout (quick)
+
+Final HDF5 file `{log_base}.hdf5` contains:
+
+- /trials/0001/keys/0001/values  — dataset with rows [position, time_to_threshold, time_abs] (float64)
+- Dataset attributes include column names as bytes: [b"position", b"time_to_threshold", b"time_abs"]
+
+`time_abs` is the wall-clock timestamp (time.time()) recorded for each sample.
+
+---
+
+## Visualizer
+
+A small interactive utility `wooting_package/visualize.py` helps explore/plot datasets inside a combined HDF5. Usage example:
+
+```bash
+python -m wooting_package.visualize path/to/wooting_logs.hdf5
+```
+
+It will list top-level entries, let you pick a trial, select a key, and plot the `values` dataset (position vs time_to_threshold). Useful for quick inspection.
+
+---
 
 ### Error Codes
 
@@ -157,12 +209,10 @@ The SDK supports multiple keycode modes that can be set using `wooting_analog_se
     └── Using Python 3.12 and + may cause issues notably due to free-threading
 - cffi >= 1.15.0
 - Wooting Analog SDK (included in package)
-- pandas
-- pyarrow
 - numpy
 - matplotlib
 - setuptools
-- pyarrow
+- hdf5
 
 ## Platform Support
 
@@ -183,7 +233,7 @@ from wooting_package import WOOTING_ACQUISITION
 
 acq = WOOTING_ACQUISITION()
 acq.initialize_keyboard()
-acqu.setup_logging(path=os.getcwd(), name="tracking.csv", int_analog=1, formats="csv")
+acqu.setup_logging(path=os.getcwd(), name="tracking.hdf5", int_analog=1, formats="hdf5")
 acq.acquire_integer_values(target_keys=['A'])
 acq.uninitialize_keyboard()
 
@@ -194,3 +244,9 @@ This initializes the interface, acquires integer values for the "A" key, and the
 ## Contributing
 
 Feel free to submit issues and enhancement requests!
+
+
+
+Faire dictionnaire pour key et key
+
+au final json, numpy et hdf5 pour logging

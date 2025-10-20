@@ -28,7 +28,7 @@ Dependencies:
 
 Usage:
 ------
-Run this script to build the Python interface for the Wooting Analog SDK.
+Script is called in the __init__.py
 The script detects the platform and uses the appropriate build settings.
 """
 import os
@@ -41,6 +41,12 @@ CURRENT_DIR   = os.path.dirname(os.path.abspath(__file__))
 INTERFACE_DIR = os.path.join(CURRENT_DIR, 'interface')
 LIBRARIES_DIR = os.path.join(CURRENT_DIR, 'libraries')
 
+SDK_LIBRARY_NAME = "wooting_analog_sdk"
+WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
+COMMON_HEADER_FILENAME  = "wooting-analog-common.h"
+WRAPPER_HEADER_FILENAME = "wooting-analog-wrapper.h"
+
+system = platform.system().lower() # 'darwin', 'linux', 'windows'
 
 def _norm_arch():
     """Normalize architecture names we care about."""
@@ -49,36 +55,27 @@ def _norm_arch():
         return "arm64"
     if arch in ("x86_64", "amd64"):
         return "x86_64"
-    # default to arm64 if unknown (safer for Apple Silicon dev)
-    return "arm64"
-
+    return "arm64" # Default
 
 def get_library_dir():
     """Return the correct library directory based on platform and architecture."""
-    system = platform.system().lower()  # 'darwin', 'linux', 'windows'
     base_dir = os.path.join(LIBRARIES_DIR, system)
-
-    if system == "darwin":
+    if system == "darwin": # .../libraries/darwin/arm64 or x86_64
         arch = _norm_arch()
-        return os.path.join(base_dir, arch)  # .../libraries/darwin/arm64 or x86_64
-
-    # linux/windows: no arch subfolder expected
-    return base_dir
-
+        return os.path.join(base_dir, arch)
+    else : # no arch subfolder
+        return base_dir
 
 def get_platform_config(library_dir):
     """Return platform-specific compile/link configuration."""
-    system = platform.system()
     arch = _norm_arch()
-
-    if system == 'Darwin':  # macOS
+    if system == 'darwin':  # macOS
         compile_args = [
             f'-I{library_dir}',  # headers
         ]
         # rpath must include the arch subfolder so the .so finds the dylibs next to the package
         extra_link_args = [f'-Wl,-rpath,@loader_path/../libraries/darwin/{arch}']
         system_libs = []
-
     elif system == 'Linux':
         compile_args = [
             '-Wall', '-Wextra', '-g', '-O0',
@@ -87,7 +84,6 @@ def get_platform_config(library_dir):
         # ELF: $ORIGIN resolves to the directory of the loaded binary
         extra_link_args = ['-Wl,-rpath,$ORIGIN/../libraries/linux']
         system_libs = []
-
     else:  # Windows
         compile_args = [
             '/W4',  # warnings
@@ -103,23 +99,12 @@ def get_platform_config(library_dir):
         'system_libs': system_libs,
     }
 
-
 def build_interface():
     """Build the Python interface for the Wooting Analog SDK."""
-    print("Building Wooting interface...")
-
+    print("\n\nBuilding Wooting interface...")
     library_dir = get_library_dir()
-    print(f"Using libraries from: {library_dir}")
-
-    # Ensure target folder exists
+    print(f"\n\tUsing libraries from: {library_dir}")
     os.makedirs(INTERFACE_DIR, exist_ok=True)
-
-    # Platform-specific names
-    system = platform.system()
-    SDK_LIBRARY_NAME = "wooting_analog_sdk"
-    WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
-    COMMON_HEADER_FILENAME  = "wooting-analog-common.h"
-    WRAPPER_HEADER_FILENAME = "wooting-analog-wrapper.h"
 
     # Verify header presence
     common_header_path  = os.path.join(library_dir, COMMON_HEADER_FILENAME)
@@ -137,7 +122,6 @@ def build_interface():
     ffib = FFI()
     ffib.cdef(common_header_code)
     ffib.cdef(wrapper_header_code)
-
     cfg = get_platform_config(library_dir)
 
     # Keep the module name 'wooting_interface' (import via: from interface import lib, ffi)
@@ -155,26 +139,14 @@ def build_interface():
     try:
         os.chdir(INTERFACE_DIR)
         ffib.compile(verbose=True)
-        print("\nInterface compiled successfully!")
+        print("\n\tInterface compiled successfully!\n")
     except Exception as e:
-        print(f"\nCompilation error: {e}")
+        print(f"\n\tCompilation error: {e}")
         if isinstance(e, subprocess.CalledProcessError) and e.output:
-            print(f"Command output:\n{e.output.decode(errors='ignore')}")
+            print(f"\tCommand output:\n{e.output.decode(errors='ignore')}")
         raise
     finally:
         os.chdir(old_cwd)
-    
-    """
-    if system == 'Darwin':
-        # Helpful note for local/dev setups affected by Gatekeeper quarantine
-        print(
-            "\n[macOS] If you still see 'Library not loaded' or 'library load disallowed by system policy', "
-            "remove quarantine and ad-hoc sign the dylib:\n"
-            f'  xattr -dr com.apple.quarantine "{library_dir}"\n'
-            f'  codesign --force --sign - "{os.path.join(library_dir, "libwooting_analog_sdk.dylib")}"\n'
-            "Then restart Python. For distribution, consider signed & notarized wheels."
-        )
-    """
     
 if __name__ == "__main__":
     build_interface()

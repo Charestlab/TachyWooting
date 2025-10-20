@@ -1,21 +1,13 @@
-"""
-Wooting Keyboard Utilities
-
-This module provides utilities for working with Wooting analog keyboards:
-- Analog value acquisition and processing
-- Keyboard initialization and management
-- Keycode conversion and handling
-"""
-
 import os
 import glob
-import json
 import time
+from typing import Dict, List, Optional, Sequence, Tuple, Union, Iterable, Any, Literal
+import shutil
+
+import h5py
 import numpy as np
-import pandas as pd
 
 from wooting_package.interface import lib, ffi
-import shutil
 
 """
 Character to Keycode Converter Module
@@ -28,7 +20,7 @@ The module maintains a comprehensive mapping of all supported keys and their
 corresponding HID keycodes used by Wooting keyboards.
 """
 
-def convert_char_to_keycode(input_values):
+def convert_char_to_keycode(input_values) -> list:
     """
     Convert between characters and keycodes for Wooting keyboards.
 
@@ -170,14 +162,12 @@ def convert_char_to_keycode(input_values):
         ['0', 98, 2, 1],
         ['.', 99, 1, 1]
     ]
-
     if not isinstance(input_values, list):
         if isinstance(input_values, (str, int)):
             input_values = [input_values]
         else:
             raise TypeError("Input must be a string, integer, or list of strings/integers.")
 
-    
     # Transpose the list for easier access to columns
     key_names, keycodes, _, _ = zip(*key_mapping)
     converted = [None] * len(input_values)
@@ -191,11 +181,10 @@ def convert_char_to_keycode(input_values):
                 if name.lower() == tgt:
                     converted[i] = keycodes[k_i]
                     break
-
             else:
                 print("Problem, not finding the input value in the key codes list.")
                 return
-
+            
         # Handle integer input (keycode to character conversion)
         elif isinstance(val, int):
             for k_i, code in enumerate(keycodes):
@@ -212,123 +201,135 @@ def convert_char_to_keycode(input_values):
     return converted
 
 def get_data_directory():
-    """
-    Return a data directory next to this file (create if missing).
+    """Return a package-local 'data' directory, creating it if needed.
+
+    Returns:
+        Absolute path to the data directory.
     """
     base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
     os.makedirs(base_path, exist_ok=True)
     return base_path
 
 
-# ============================================================
-# Multi-format logging helpers
-# ============================================================
+# Logging helpers
+def _timestamped_if_exists(path: str) -> str:
+    """Return `path` or a timestamped variant if it already exists."""
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    cand = f"{base}_{ts}{ext}"
+    i = 1
+    while os.path.exists(cand):
+        cand = f"{base}_{ts}-{i}{ext}"
+        i += 1
+    return cand
 
-_SUPPORTED_FORMATS = {"parquet", "csv", "json", "npy"}
+def _write_trial_file(
+    path: str,
+    hier_trial: Dict[str, Dict[str, Dict[str, Sequence[float]]]],
+) -> None:
+    """Write one per-trial shard as hierarchical HDF5 (HDF5 only).
 
-def _ext_from_format(fmt: str) -> str:
-    return {
-        "parquet": "parquet",
-        "csv": "csv",
-        "json": "json",
-        "npy": "npy",
-    }[fmt]
-
-def _df_from_records(records):
-    return pd.DataFrame.from_records(
-        records, columns=["trial", "key", "position", "time_to_threshold", "time_abs"]
-    )
-
-def _write_trial_file(fmt, path, records):
+    Layout:
+      /trials/<trial>/keys/<key>/values  (N×3: [position, time_to_threshold, time_abs])
     """
-    Write ONE per-trial file according to the requested format.
-    Schema: trial, key, position, time_to_threshold
-    """
-    if fmt in ("parquet", "csv"):
-        df = _df_from_records(records)
-        if fmt == "parquet":
-            df.to_parquet(path, index=False)
-        else:
-            df.to_csv(path, index=False)
-    elif fmt == "json":
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(records, f, ensure_ascii=False)
-    elif fmt == "npy":
-        arr = np.array(
-            [
-                (int(r["trial"]), int(r["key"]), float(r["position"]), float(r["time_to_threshold"]))
-                for r in records
-            ],
-            dtype=[("trial", "i8"), ("key", "i8"), ("position", "f8"), ("time_to_threshold", "f8")],
-        )
-        np.save(path, arr)
-    else:
-        raise ValueError(f"Unknown format: {fmt}")
-
-def _combine_all_trials(fmt, staging_dir, final_dir, base):
-    """
-    Combine all {staging_dir}/{base}_trial*.ext into {final_dir}/{base}.ext
-    and delete the per-trial files. Removes the staging dir if empty.
-    After combining, also deletes the combined file in the staging directory if it exists.
-    """
-    ext = _ext_from_format(fmt)
-    pattern = os.path.join(staging_dir, f"{base}_trial*.{ext}")
+    with h5py.File(path, "a") as f:
+        g_trials = f.require_group("trials")
+        for t_str, keys in hier_trial.items():
+            g_trial = g_trials.require_group(f"{int(t_str):04d}")
+            g_keys  = g_trial.require_group("keys")
+            for k_str, serie in keys.items():
+                g_key = g_keys.require_group(f"{int(k_str):04d}")
+                data = np.asarray(
+                    list(zip(
+                        serie.get("position", []),
+                        serie.get("time_to_threshold", []),
+                        serie.get("time_abs", []),
+                    )),
+                    dtype=np.float64,
+                )
+                if "values" in g_key:
+                    ds = g_key["values"]
+                    old = ds.shape[0]
+                    ds.resize((old + data.shape[0], 3))
+                    ds[old:] = data
+                else:
+                    ds = g_key.create_dataset(
+                        "values",
+                        data=data,
+                        maxshape=(None, 3),
+                        chunks=True,
+                        compression="gzip",
+                        shuffle=True,
+                    )
+                    ds.attrs["columns"] = np.array(
+                        ["position", "time_to_threshold", "time_abs"], dtype="S"
+                    )
+    
+def _combine_all_trials(staging_dir: str, final_dir: str, base: str) -> None:
+    """Combine `{base}_trial*.hdf5` into one hierarchical HDF5, then clean up."""
+    pattern = os.path.join(staging_dir, f"{base}_trial*.hdf5")
     files = sorted(glob.glob(pattern))
     if not files:
-        return  # nothing to do
+        return
 
     os.makedirs(final_dir, exist_ok=True)
-    final_path = os.path.join(final_dir, f"{base}.{ext}")
+    preferred_final_path = os.path.join(final_dir, f"{base}.hdf5")
+    final_path = _timestamped_if_exists(preferred_final_path)
+    with h5py.File(final_path, "a") as fout:
+        g_out_trials = fout.require_group("trials")
+        for shard in files:
+            with h5py.File(shard, "r") as fin:
+                if "trials" not in fin:
+                    continue
 
-    if fmt in ("parquet", "csv"):
-        dfs = []
-        for fp in files:
-            if fmt == "parquet":
-                dfs.append(pd.read_parquet(fp))
-            else:
-                dfs.append(pd.read_csv(fp))
-        combined = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(
-            columns=["trial", "key", "position", "time_to_threshold", "time_abs"]
-        )
-        if fmt == "parquet":
-            combined.to_parquet(final_path, index=False)
-        else:
-            combined.to_csv(final_path, index=False)
+                g_in_trials = fin["trials"]
+                for trial_name in g_in_trials:
+                    g_in_trial  = g_in_trials[trial_name]
+                    g_out_trial = g_out_trials.require_group(trial_name)
+                    g_out_keys  = g_out_trial.require_group("keys")
+                    g_in_keys = g_in_trial.get("keys")
+                    if g_in_keys is None:
+                        continue
 
-    elif fmt == "json":
-        all_records = []
-        for fp in files:
-            with open(fp, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    all_records.extend(data)
-                else:
-                    raise ValueError(f"JSON file is not an array: {fp}")
-        with open(final_path, "w", encoding="utf-8") as f:
-            json.dump(all_records, f, ensure_ascii=False)
+                    for key_name in g_in_keys:
+                        g_in_key = g_in_keys[key_name]
+                        if "values" not in g_in_key:
+                            continue
 
-    elif fmt == "npy":
-        arrays = [np.load(fp, allow_pickle=False) for fp in files]
-        if arrays:
-            combined = np.concatenate(arrays, axis=0)
-            np.save(final_path, combined)
-
-    # Cleanup per-trial files
+                        data_in = g_in_key["values"][()]  # (N, 3)
+                        g_out_key = g_out_keys.require_group(key_name)
+                        if "values" in g_out_key:
+                            ds = g_out_key["values"]
+                            old = ds.shape[0]
+                            ds.resize((old + data_in.shape[0], 3))
+                            ds[old:] = data_in
+                        else:
+                            ds = g_out_key.create_dataset(
+                                "values",
+                                data=data_in,
+                                maxshape=(None, 3),
+                                chunks=True,
+                                compression="gzip",
+                                shuffle=True,
+                            )
+                            cols = g_in_key["values"].attrs.get("columns")
+                            if cols is not None:
+                                ds.attrs["columns"] = cols
+    # cleanup shards
     for fp in files:
         try:
             os.remove(fp)
         except OSError:
             pass
-
-    # Remove the staging directory if now empty
     try:
         if not os.listdir(staging_dir):
             os.rmdir(staging_dir)
     except OSError:
         pass
-
-    # Delete the combined file in the staging directory if it exists
-    staging_combined_path = os.path.join(staging_dir, f"{base}.{ext}")
+    # safety: remove accidental combined-in-staging
+    staging_combined_path = os.path.join(staging_dir, f"{base}.hdf5")
     if os.path.isfile(staging_combined_path):
         try:
             os.remove(staging_combined_path)
@@ -336,140 +337,128 @@ def _combine_all_trials(fmt, staging_dir, final_dir, base):
             pass
 
 
-# ============================================================
-# Acquisition class with multi-format logging + merge on uninit
-# ============================================================
-
 _ACTIVE_LOGGERS = set()  # all instances with logging enabled (for global uninit)
 
 class WOOTING_ACQUISITION:
-    """
-    Acquisition manager for Wooting analog keyboards with multi-format logging.
-    """
+    """Manage acquisition from Wooting analog keyboards with **hierarchical HDF5** logging.
 
+    HDF5 layout (fixed):
+        /trials/<trial4>/keys/<key4>/values  # shape=(N, 3)
+            columns = ["position", "time_to_threshold", "time_abs"]
+
+    Attributes:
+        trial: Current trial index (1-based).
+        logging_enabled: Whether logging is active.
+        int_analog: Mode flag (1=int 0..255, 2=analog 0..1).
+        log_dir: Output directory for logs.
+        log_base: Base filename (without extension).
+        trial_pad: Zero-padding for trial folder names.
+        output_paths: Final output paths (HDF5 only).
+        staging_dir: Directory for per-trial shards.
+
+    Methods :
+        setup_logging(): Configure HDF5 logging and staging folders.
+        acquire_analog_values(): Acquire in analog mode; optionally log; return hier.
+        acquire_integer_values(): Acquire in int mode; rescale to 0..255; optionally log.
+        initialize_keyboard(): Init Wooting SDK; optionally print device info.
+        uninitialize_keyboard(): Uninit SDK and merge any pending shards.
+    """
     def __init__(self):
-        self.trial = 1
-        self.logging_enabled = False
-        self.int_analog = 2  # 1=int (0..255), 2=analog (0..1)
-        self.log_dir = os.getcwd()      # final output directory
-        self.log_base = "wooting_logs"
-        self.log_formats = ["parquet"]  # can be list, e.g. ["csv","json"]
-
-        # Number of digits for zero-padding trial numbers (e.g., 0001)
-        self.trial_pad = 4
-
-        # Final outputs per enabled format, e.g. {"csv": ".../tracking.csv"}
-        self.output_paths = {}
-
-        # Staging directory where per-trial files are written
-        self.staging_dir = None
-
-        # Deprecated compatibility shim (parquet_full_path)
-        self._deprecated_warned = False    
-
-    # --- Deprecated property kept for backward compatibility ---
-
-    @property
-    def parquet_full_path(self):
-        # Replaced warning with a hard failure as requested
-        raise ValueError("parquet_full_path is deprecated; use output_paths.get('parquet').")
-
-    @parquet_full_path.setter
-    def parquet_full_path(self, value):
-        # Replaced warning with a hard failure as requested
-        raise ValueError("Setting parquet_full_path is deprecated; set output_paths['parquet'] instead.")
+        """Initialize acquisition state (no hardware init, no logging yet)."""
+        self.trial: int = 1
+        self.logging_enabled: bool = False
+        self.int_analog: Literal[1, 2] = 2  # 1=int (0..255), 2=analog (0..1)
+        self.log_dir: str = os.getcwd()
+        self.log_base: str = "wooting_logs"
+        self.trial_pad: int = 4
+        self.output_paths: Dict[str, str] = {}
+        self.staging_dir: Optional[str] = None
 
     # ---------- Setup logging (new) ----------
+    def setup_logging(self, name: str | None = None, path: str = None, int_analog: int = 2) -> None:
+        """Configure hierarchical HDF5 logging (HDF5 only). Logs with per-trial files and then combine them.
+           Final combine produces a single `{name}.hdf5` file with layout:
+                /trials/<trial>/keys/<key>/values  (N×3: [position, time_to_threshold, time_abs])
 
-    def setup_logging(self, name=None, path=None, int_analog=2, formats="parquet"):
+        Args:
+            name (str): Name of the log file.
+                Default is "wooting_logs".
+            path (str): Path for the log file.
+                Default is os.getcwd(). 
+            int_analog: Format for the positions. Either int (1) or analog (2).
+                Default is 2 (analog).
         """
-        Configure logging.
-        - name: base name or name with extension (e.g., 'tracking.parquet' or 'tracking')
-        - path: directory (defaults to CWD if None)
-        - int_analog: 1 (integer 0..255) or 2 (analog 0..1)
-        - formats: str or list[str] among {'parquet','csv','json','npy'}
-
-        Creates per-trial files in a staging folder:
-            {log_dir}/{log_base}_trials/{base}_trial{N}.{ext}
-        On uninitialize, all trials are merged into:
-            {log_dir}/{log_base}.{ext}
-        """
-        # Final output directory
         self.log_dir = path if path is not None else os.getcwd()
         os.makedirs(self.log_dir, exist_ok=True)
-
-        # Formats
-        if isinstance(formats, str):
-            formats = [formats]
-        for f in formats:
-            if f not in _SUPPORTED_FORMATS:
-                raise ValueError(f"Unsupported format '{f}'. Choose among {_SUPPORTED_FORMATS}.")
-        self.log_formats = list(dict.fromkeys(formats))  # dedupe, keep order
-
-        # Base name (+ optional ext)
-        if name is None:
-            self.log_base = "wooting_logs"
-        else:
-            base, ext = os.path.splitext(name)
-            if ext and ext.lstrip(".") in _SUPPORTED_FORMATS:
-                # name provided with extension -> force that single format
-                self.log_base = base
-                self.log_formats = [ext.lstrip(".")]
-            else:
-                self.log_base = name
-
-        # Final outputs per format
-        self.output_paths = {
-            fmt: os.path.join(self.log_dir, f"{self.log_base}.{fmt}") for fmt in self.log_formats
-        }
-
-        # Staging directory for per-trial files
+        self.log_base = "wooting_logs" if name is None else os.path.splitext(name)[0]
+        self.output_paths = {"hdf5": os.path.join(self.log_dir, f"{self.log_base}.hdf5")}
         self.staging_dir = os.path.join(self.log_dir, f"{self.log_base}_trials")
         os.makedirs(self.staging_dir, exist_ok=True)
-
-        # int/analog mode
         if int_analog not in (1, 2):
             raise ValueError("int_analog must be 1 (int) or 2 (analog)")
         self.int_analog = int_analog
-
         self.logging_enabled = True
-        _ACTIVE_LOGGERS.add(self)
 
-    # ---------- Internal helpers ----------
+    def _write_hdf5_trial_shard(self, hier: Dict[str, Dict[str, Dict[str, Sequence[float]]]]) -> None:
+        """Write one HDF5 shard for the current trial in hierarchical layout."""
+        trial_path = os.path.join(self.staging_dir, f"{self.log_base}_trial{self.trial:0{self.trial_pad}d}.hdf5")
+        _write_trial_file(trial_path, hier)
 
-    def _write_logs_multi_(self, collected_data):
-        """
-        Write exactly one per-trial file (per enabled format) into the staging folder.
-        """
-        for fmt in self.log_formats:
-            ext = _ext_from_format(fmt)
-            trial_path = os.path.join(
-                self.staging_dir,
-                f"{self.log_base}_trial{self.trial:0{self.trial_pad}d}.{ext}"
-            )
-            _write_trial_file(fmt, trial_path, collected_data)
-
-    def _combine_trials_for_all_formats(self):
-        """
-        Combine per-trial files from the staging folder into one file per format,
-        then delete per-trial files and remove the staging folder if empty.
-        """
+    def _combine_trials_for_all_formats(self) -> None:
+        """Combine per-trial files from the staging folder into one file per format, and delete per-trial files."""
         if not self.logging_enabled or not self.staging_dir:
             return
-        for fmt in self.log_formats:
-            _combine_all_trials(fmt, self.staging_dir, self.log_dir, self.log_base)
+        _combine_all_trials(self.staging_dir, self.log_dir, self.log_base)
 
-    # ---------- Acquisition core ----------
+    def _finalize_bins_to_hier(self, bins: Dict[Tuple[int, int], List[Tuple[float, float, float]]],
+    ) -> Dict[str, Dict[str, Dict[str, np.ndarray]]]:
+        """Build a hierarchical structure from (trial, key) bins.
+        Each bin key is (trial, keycode) → list of (time_to_threshold, time_abs, position).
+        For each key, samples are sorted by time_to_threshold to ensure chronological order.
+
+        Returns:
+        A dictionary of shape:
+        { "<trial>": 
+                    { "<key>": { "time_to_threshold": np.ndarray,
+                                 "time_abs": np.ndarray,
+                                 "position": np.ndarray
+                    },
+        }
+        """
+        hier: Dict[str, Dict[str, Dict[str, np.ndarray]]] = {}
+        for (t, k), triplets in bins.items():
+            triplets.sort(key=lambda x: x[0]) # Sort by time_to_threshold
+            tth = np.fromiter((x[0] for x in triplets), dtype=np.float64, count=len(triplets))
+            tabs = np.fromiter((x[1] for x in triplets), dtype=np.float64, count=len(triplets))
+            pos  = np.fromiter((x[2] for x in triplets), dtype=np.float64, count=len(triplets))
+            t_str, k_str = str(t), str(k)
+            hier.setdefault(t_str, {})[k_str] = {"time_to_threshold": tth, "time_abs": tabs, "position": pos}
+        return hier
 
     def _acquire_raw_values(
         self,
-        target_keys,
-        threshold=0.1,
-        duration_after_threshold=0.5,
-        duration_before_threshold=None,
-        sampling_interval=1/8000,  # Wooting Tachyon mode up to 8000 Hz
-        verbose=False
-    ):
+        target_keys: Sequence[Union[str, int]],
+        threshold: float = 0.1,
+        duration_after_threshold: float = 0.5,
+        duration_before_threshold: Optional[float] = None,
+        sampling_interval: float = 1 / 8000,
+        verbose: bool = False,
+    ) -> Dict[str, Dict[str, Dict[str, np.ndarray]]]:
+        """Record samples around a threshold crossing and return hierarchical data.
+
+        Args:
+            target_keys: Keys as characters (e.g., 'z') or HID keycodes (ints).
+            threshold: Crossing threshold in (0, 1].
+            duration_after_threshold: Seconds to record after the first crossing.
+            duration_before_threshold: Max seconds before the crossing to keep
+                (None keeps all pre-threshold buffer).
+            sampling_interval: Sleep between polls (seconds).
+            verbose: Print runtime info.
+
+        Returns:
+            A hierarchical dictionary. Each time-point has [time_threshold, time_abs, position] 
+            and is under a key, which is under a trial.
+        """
         if isinstance(target_keys, list):
             if any(isinstance(k, str) for k in target_keys):
                 target_keys = convert_char_to_keycode(target_keys)
@@ -485,21 +474,19 @@ class WOOTING_ACQUISITION:
         if duration_before_threshold is not None and duration_before_threshold <= 0:
             raise ValueError("Duration before threshold must be positive")
 
-        buffer_pre_threshold = []
-        collected_data = []
+        buffer_pre_threshold: List[Dict[str, Union[int, float]]] = []
         triggered = False
-        trigger_time_ns = None
-
+        trigger_time_ns: Optional[int] = None
+        # bins[(trial, keycode)] -> list of (time_to_threshold, time_abs, position)
+        bins: Dict[Tuple[int, int], List[Tuple[float, float, float]]] = {}
         if verbose:
             print(f"Waiting for any key in {target_keys} to exceed threshold {threshold}...")
-
         while True:
             current_time_ns = time.time_ns()
             snapshot = []
             for code in target_keys:
                 value = lib.wooting_analog_read_analog(code)
-                snapshot.append({'time_ns': current_time_ns, 'key': code, 'position': value})
-
+                snapshot.append({'time_ns': current_time_ns, 'key': int(code), 'position': float(value)})
             if not triggered:
                 for s in snapshot:
                     if s['position'] >= threshold:
@@ -513,93 +500,134 @@ class WOOTING_ACQUISITION:
 
             if triggered:
                 for s in snapshot:
-                    collected_data.append({
-                        'trial': self.trial,
-                        'key': s['key'],
-                        'position': s['position'],
-                        'time_to_threshold': (s['time_ns'] - trigger_time_ns) / 1e9,
-                        'time_abs': (s['time_ns']/10**9)
-                    })
-                
-                if (current_time_ns - trigger_time_ns) / 1e9 >= duration_after_threshold:
+                    tth = (s['time_ns'] - trigger_time_ns) / 1e9  # type: ignore[arg-type]
+                    tabs = s['time_ns'] / 1e9
+                    pos  = s['position']
+                    bins.setdefault((self.trial, s['key']), []).append((tth, tabs, pos))
+                if (current_time_ns - trigger_time_ns) / 1e9 >= duration_after_threshold:  # type: ignore[operator]
                     break
+
             time.sleep(sampling_interval)
 
-        for s in buffer_pre_threshold:
-            time_to_threshold = (s['time_ns'] - trigger_time_ns) / 1e9
-            if duration_before_threshold is None or abs(time_to_threshold) <= duration_before_threshold:
-                collected_data.append({
-                    'trial': self.trial,
-                    'key': s['key'],
-                    'position': s['position'],
-                    'time_to_threshold': time_to_threshold,
-                    'time_abs': (s['time_ns']/10**9)
-                })
-        collected_data.sort(key=lambda x: x['time_to_threshold'])
+        for s in buffer_pre_threshold: # Add pre-threshold data 
+            tth = (s['time_ns'] - trigger_time_ns) / 1e9  # type: ignore[arg-type]
+            if duration_before_threshold is None or abs(tth) <= duration_before_threshold:
+                tabs = s['time_ns'] / 1e9
+                pos  = s['position']
+                bins.setdefault((self.trial, s['key']), []).append((tth, tabs, pos))
+
         if verbose:
-            print(f"\nAcquisition complete ({len(collected_data)} samples captured).")
-        return collected_data
+            total = sum(len(v) for v in bins.values())
+            print(f"\nAcquisition complete ({total} samples captured).")
+
+        hier = self._finalize_bins_to_hier(bins) # Return hierarchical structure (np arrays)
+        return hier
 
     def acquire_analog_values(
         self,
-        target_keys,
-        threshold=0.1,
-        duration_after_threshold=0.5,
-        duration_before_threshold=None,
-        sampling_interval=1/8000,
-        verbose=False
+        target_keys: Sequence[Union[str, int]],
+        threshold: float = 0.1,
+        duration_after_threshold: float = 0.5,
+        duration_before_threshold: float = 0.2,
+        sampling_interval: float = 1 / 8000,
+        verbose: bool = False,
     ):
+        """Acquire analog samples and return hierarchical data.
+
+        When logging is enabled in analog mode, this writes one HDF5 shard for the
+        current trial via `_write_hdf5_trial_shard(hier)`.
+
+        Args:
+            target_keys (Sequence[Union[str, int]]): Keys as characters or HID keycodes.
+            threshold (float): Analog threshold in (0, 1], how much pressure to count key-press as a response.
+                Default is 0.1 (10% of the maximum pressure).
+            duration_after_threshold (float): Seconds to capture after crossing.
+                Default is 0.5s logged after the threshold is reach.
+            duration_before_threshold (float): Seconds to keep before crossing.
+                Default is 0.2s logged before the threshold is reach.
+            sampling_interval (float): Poll interval (seconds).
+                Default is 1/8000s.
+            verbose (bool) : Print runtime info.
+
+        Returns:
+            Hierarchical dict (trial → key → np.ndarrays with `position` as float64).
+        """
         if self.logging_enabled and self.int_analog == 1:
             raise ValueError("Cannot use acquire_analog_values when logging in integer mode (int_analog=1). Use acquire_integer_values instead.")
-
-        collected_data = self._acquire_raw_values(
+        hier = self._acquire_raw_values(
             target_keys=target_keys,
             threshold=threshold,
             duration_after_threshold=duration_after_threshold,
             duration_before_threshold=duration_before_threshold,
             sampling_interval=sampling_interval,
-            verbose=verbose
+            verbose=verbose,
         )
         if self.logging_enabled and self.int_analog == 2:
-            self._write_logs_multi_(collected_data)
-
+            self._write_hdf5_trial_shard(hier)
         self.trial += 1
-        return collected_data
+        return hier
+
 
     def acquire_integer_values(
         self,
-        target_keys,
-        threshold=26,
-        duration_after_threshold=0.5,
-        duration_before_threshold=None,
-        sampling_interval=1/8000,
-        verbose=False
+        target_keys: Sequence[Union[str, int]],
+        threshold: int = 26,
+        duration_after_threshold: float = 0.5,
+        duration_before_threshold: float = 0.2,
+        sampling_interval: float = 1 / 8000,
+        verbose: bool = False,
     ):
-        if self.logging_enabled and self.int_analog == 2:
-            raise ValueError("Cannot use acquire_integer_values when logging in analog mode (int_analog=2). Use acquire_analog_values instead.")
+        """Acquire integer-mode samples (0..255) and return hierarchical data.
 
-        collected_data = self._acquire_raw_values(
+        Wraps `_acquire_raw_values`, rescales 'position' to 0..255 (int16), and
+        writes one HDF5 shard per trial if logging is enabled in integer mode.
+
+        Args:
+            target_keys (Sequence[Union[str, int]]): Keys as characters or HID keycodes.
+            threshold (int): Integer threshold in [0..255], how much pressure to count key-press as a response.
+                Default is 26 (≈10% max pressure point ≈ 26). 
+            duration_after_threshold (float): Seconds to capture after crossing.
+                Default is 0.5s logged after the threshold is reach.
+            duration_before_threshold (float): Seconds to keep before crossing.
+                Default is 0.2s logged before the threshold is reach.
+            sampling_interval: Poll interval (seconds).
+                Default is 1/8000s.
+            verbose: Print runtime info.
+
+        Returns:
+            Hierarchical dict (trial → key → np.ndarrays with `position` as int16).
+        """
+        if self.logging_enabled and self.int_analog == 2:
+            raise ValueError("Cannot use acquire_integer_values when logging in analog mode (int_analog=2). " \
+            "Use acquire_analog_values instead.")
+        hier = self._acquire_raw_values(
             target_keys=target_keys,
-            threshold=threshold/255,
+            threshold=threshold / 255.0,
             duration_after_threshold=duration_after_threshold,
             duration_before_threshold=duration_before_threshold,
             sampling_interval=sampling_interval,
-            verbose=verbose
+            verbose=verbose,
         )
-        for d in collected_data:
-            d['position'] = round(d['position'] * 255)
-
+        for t_str, keys in hier.items(): 
+            for k_str, serie in keys.items():
+                serie["position"] = np.rint(serie["position"] * 255.0).astype(np.int16) # Rescale positions per key
         if self.logging_enabled and self.int_analog == 1:
-            self._write_logs_multi_(collected_data)
-
+            self._write_hdf5_trial_shard(hier)
         self.trial += 1
-        return collected_data
+        return hier
 
-    # ---------- Optional instance-level init/uninit ----------
+    def initialize_keyboard(self, verbose: bool = False) -> bool:
+        """Initialize the Wooting SDK for this process.
 
-    def initialize_keyboard(self, verbose=False):
-        """
-        Initialize Wooting interface (instance helper).
+        Args:
+            verbose: Print detected device info.
+
+        Returns:
+            True if initialization succeeds.
+
+        Raises:
+            ValueError: If initialization fails or interface is not ready.
+            RuntimeError: If no devices are found.
         """
         if not lib.wooting_analog_initialise():
             raise ValueError("Error: Failed to initialize Wooting interface")
@@ -630,79 +658,34 @@ Detected Wooting keyboard:
 """)
         return True
 
-    def uninitialize_keyboard(self):
-        """
-        Uninitialize interface and merge all per-trial logs (for this instance).
-        """
+    def uninitialize_keyboard(self) -> None:
+        """Uninitialize the SDK and merge per-trial logs for this instance."""
         try:
             lib.wooting_analog_uninitialise()
         finally:
+            # Merge for every active logger and clear registry
+            for logger in list(_ACTIVE_LOGGERS):
+                try:
+                    logger._combine_trials_for_all_formats()
+                except Exception:
+                    pass
+            _ACTIVE_LOGGERS.clear()
             self._combine_trials_for_all_formats()
-
-
-# ============================================================
-# Global init/uninit (backward compatible) + active logger merge
-# ============================================================
-
-def initialize_keyboard(verbose=False):
-    """
-    Initialize the Wooting keyboard interface (global).
-    """
-    if not lib.wooting_analog_initialise():
-        raise ValueError("Error: Failed to initialize Wooting interface")
-    if not lib.wooting_analog_is_initialised():
-        raise ValueError("Error: Interface not properly initialized")
-
-    device_count = lib.wooting_analog_initialise()
-    if device_count <= 0:
-        raise RuntimeError("No Wooting devices found.")
-
-    buffer = ffi.new("WootingAnalog_DeviceInfo_FFI *[]", device_count)
-    lib.wooting_analog_get_connected_devices_info(buffer, device_count)
-
-    if verbose:
-        device = buffer[0]
-        vendor = f"0x{device.vendor_id:04x}"
-        product = f"0x{device.product_id:04x}"
-        manufacturer = ffi.string(device.manufacturer_name).decode() if device.manufacturer_name else "Unknown"
-        device_name = ffi.string(device.device_name).decode() if device.device_name else "Unknown"
-        print(f"""
-Detected Wooting keyboard:
-    - Vendor ID       : {vendor}
-    - Product ID      : {product}
-    - Device ID       : {device.device_id}
-    - Device Type     : {device.device_type}
-    - Manufacturer    : {manufacturer}
-    - Device Name     : {device_name}
-""")
-    return True
-
-
-def uninitialize_keyboard():
-    """
-    Uninitialize the Wooting keyboard interface (global) and
-    merge all per-trial logs for ALL active loggers, then clear registry.
-    """
-    try:
-        lib.wooting_analog_uninitialise()
-    finally:
-        # Merge for every active logger and clear registry
-        for logger in list(_ACTIVE_LOGGERS):
-            try:
-                logger._combine_trials_for_all_formats()
-            except Exception:
-                pass
-        _ACTIVE_LOGGERS.clear()
-
 
 # ============================================================
 # Maintenance helpers
 # ============================================================
 
-def delete_interface():
-    """
-    Deletes every file starting with 'wooting_interface' in the interface directory.
-    Also cleans local __pycache__, plot.png, tracking.csv, and egg-info at project root.
+def delete_interface(file):
+    """Remove compiled CFFI artifacts and common build leftovers.
+
+    Args:
+        file (str): name of the file for the tracking.
+    Deletes:
+        - `wooting_interface*` in the interface folder
+        - `__pycache__` under this package and its 'interface' subfolder
+        - `plot.png` and `tracking.csv` one level above the package
+        - `<project_root>/wooting_interface.egg-info`
     """
     interface_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "interface")
     pattern = os.path.join(interface_dir, "wooting_interface*")
@@ -724,7 +707,7 @@ def delete_interface():
                 pass
     # Delete "plot.png" and "tracking.csv" in the parent directory of wooting_package
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for filename in ["plot.png", "tracking.csv"]:
+    for filename in ["plot.png", f"{file}"]:
         file_path = os.path.join(parent_dir, filename)
         if os.path.isfile(file_path):
             try:
@@ -740,4 +723,4 @@ def delete_interface():
             shutil.rmtree(egg_info_dir)
         except Exception:
             pass
-#delete_interface()
+delete_interface("tracking.parquet")
