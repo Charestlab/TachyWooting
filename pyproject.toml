@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wooting_interface"
+version = "0.1.0"
+description = "Python interface for Wooting analog keyboards"
+readme = "README.md"
+requires-python = ">=3.6"
+license = {text = "See LICENSE file"}
+authors = [
+    {name = "Mathias Salvas-Hébert"},
+    {name = "Guillaume Lalonde-Beaudoin"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "cffi>=1.15.0",
+    "setuptools>=61.0",  # Required by CFFI for Python >= 3.12
+    "pandas",
+    "pyarrow",
+    "numpy",
+    "matplotlib",
+    "h5py",  # Required for HDF5 logging functionality
+    "tqdm>=4.60.0",
+    "rich>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "flake8",
+]
+
+[tool.setuptools]
+packages = ["wooting_package"]
+
+[tool.setuptools.package-data]
+wooting_package = [
+    "interface/*.so",
+    "interface/*.dylib",
+    "interface/*.dll",
+    "interface/*.pyd",
+    "libraries/**/*",
+    "permissions/**/*",
+]
+
+[project.scripts]
+wooting-demo = "wooting_package.cli:main"
+wooting-delete-interface = "wooting_package.wooting_utils:delete_interface"
+

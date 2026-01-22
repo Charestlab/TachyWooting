@@ -50,11 +50,11 @@ def extract_header_code(common_header_path, wrapper_header_path):
     return ''.join(extracted_code_common), ''.join(extracted_code_wrapper)
 
 if __name__ == "__main__":
-    # Test du module
+    # Test the module
     common_path = 'wootingSubLibrary/wooting-analog-common.h'
     wrapper_path = 'wootingSubLibrary/wooting-analog-wrapper.h'
     common_code, wrapper_code = extract_header_code(common_path, wrapper_path)
-    print("Code extrait du fichier commun:")
+    print("Extracted code from common file:")
     print(common_code)
     print("\nExtracted code from wrapper file:")
     print(wrapper_code)

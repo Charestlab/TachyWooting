@@ -676,11 +676,11 @@ Detected Wooting keyboard:
 # Maintenance helpers
 # ============================================================
 
-def delete_interface(file):
+def delete_interface(file = None):
     """Remove compiled CFFI artifacts and common build leftovers.
 
     Args:
-        file (str): name of the file for the tracking.
+        file (Optional[str]): name of the file for the tracking.
     Deletes:
         - `wooting_interface*` in the interface folder
         - `__pycache__` under this package and its 'interface' subfolder
@@ -707,13 +707,14 @@ def delete_interface(file):
                 pass
     # Delete "plot.png" and "tracking.csv" in the parent directory of wooting_package
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for filename in ["plot.png", f"{file}"]:
-        file_path = os.path.join(parent_dir, filename)
-        if os.path.isfile(file_path):
-            try:
-                os.remove(file_path)
-            except OSError:
-                pass
+    if file :
+        for filename in ["plot.png", f"{file}"]:
+            file_path = os.path.join(parent_dir, filename)
+            if os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
 
     # Delete "<project_root>/wooting_interface.egg-info" directory
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -723,4 +724,3 @@ def delete_interface(file):
             shutil.rmtree(egg_info_dir)
         except Exception:
             pass
-delete_interface("tracking.parquet")

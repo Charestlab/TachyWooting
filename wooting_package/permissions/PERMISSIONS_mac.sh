@@ -4,10 +4,12 @@ set -euo pipefail
 # Detect architecture (arm64 or x86_64)
 ARCH="$(uname -m)"
 
-# BASE_DIR = dossier du script (le script est à la racine du package: .../wooting_package)
-BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# BASE_DIR = script directory (script is in permissions/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Go up one level to access the package root
+BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# CORRECTION: enlever le "wooting_package/" redondant
+# Path to libraries
 LIB_DIR="$BASE_DIR/libraries/darwin/$ARCH"
 
 echo "Removing quarantine from: $LIB_DIR"
