@@ -1,3 +1,0 @@
-[console_scripts]
-wooting-delete-interface = wooting_package.wooting_utils:delete_interface
-wooting-demo = wooting_package.cli:main
