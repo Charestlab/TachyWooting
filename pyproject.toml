@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Python interface for Wooting analog keyboards"
 readme = "README.md"
 requires-python = ">=3.6"
-license = {text = "See LICENSE file"}
+license = {file = "LICENSE"}
 authors = [
     {name = "Mathias Salvas-Hébert"},
     {name = "Guillaume Lalonde-Beaudoin"}
