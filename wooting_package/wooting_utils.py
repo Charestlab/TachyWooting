@@ -841,48 +841,23 @@ class WOOTING_ACQUISITION:
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
         trial_start_clock: str = "perf",
+        callback=None,
+        callback_delay=None,
+        quit_key: Optional[Union[str, int]] = None,
     ) -> Dict[str, Dict[str, Dict[str, np.ndarray]]]:
         """
-        Record samples around a threshold crossing and return hierarchical data.
+        Low-level acquisition of analog key positions around a threshold crossing.
 
-        Core idea
-        ---------
-        Internally, *all* samples are timestamped with `time.perf_counter_ns()` (high-resolution,
-        monotonic, best for short-interval timing). Therefore, the "trial start" reference
-        (stimulus onset) must be expressed in the *same* clock domain (perf_counter) so that
-        `time_to_threshold` is consistent across trials.
+        If `quit_key` is provided, the function also detects whether this key was pressed
+        at any time during the trial and returns a boolean flag.
 
-        Rules
-        -----
-        - Only target keys are kept.
-        - Every tick includes all target keys (0.0 if missing).
-        - Trigger occurs when ANY target crosses threshold.
+        Returns
+        -------
+        hier : dict
+            Acquisition data.
 
-        trial_start_ns / trial_start_clock (stimulus onset reference)
-        -------------------------------------------------------------
-        You may provide a stimulus-onset timestamp (`trial_start_ns`) coming from either:
-          - "perf": `trial_start_ns` is already `time.perf_counter_ns()`
-          - "mono": `trial_start_ns` is `time.monotonic_ns()` (e.g., from tachypy/SDL)
-
-        IMPORTANT: When `trial_start_clock == "mono"`, we do NOT "convert clocks" in an absolute sense.
-        Instead, we *project* the monotonic timestamp into the perf_counter domain using an anchor:
-          1) We read both clocks nearly simultaneously at acquisition start:
-                anchor_perf_ns = time.perf_counter_ns()
-                anchor_mono_ns = time.monotonic_ns()
-          2) We estimate an offset between the two domains at that instant:
-                offset ≈ anchor_perf_ns - anchor_mono_ns
-          3) We project the provided monotonic trial start into perf_counter time:
-                trial_start_perf_ns = trial_start_mono_ns + offset
-
-        This makes all timing (samples + trial start) comparable *within the trial* in perf_counter time.
-        The projection is approximate (depends on anchor timing), but is typically accurate enough for
-        ms-level alignment in a single process.
-
-        Output
-        ------
-        - `time_to_threshold` is expressed in seconds relative to `trial_start_perf_ns`
-          (i.e., time since stimulus onset, in the perf_counter domain).
-        - `time_abs` is wall-clock seconds since epoch (from `time.time_ns()`), useful for rough logging.
+        (hier, quit_pressed) : tuple
+            Returned only if `quit_key` is provided.
         """
 
         target_codes = self._to_keycodes(target_keys)
@@ -896,8 +871,27 @@ class WOOTING_ACQUISITION:
         if trial_start_clock not in {"perf", "mono"}:
             raise ValueError("trial_start_clock must be 'perf' or 'mono'")
 
-        # Anchor both clocks as close in time as possible for a stable conversion.
-        # We keep acquisition timing and samples in perf_counter_ns.
+        # --- strict validation for timed callback ---
+        if callback is not None:
+            if callback_delay is None or callback_delay <= 0:
+                raise ValueError("callback_delay must be > 0 when callback is provided.")
+
+        # --- quit key handling (optional) ---
+        quit_code: Optional[int] = None
+        quit_pressed = False
+        if quit_key is not None:
+            q = self._to_keycodes([quit_key])
+            if len(q) != 1:
+                raise ValueError("quit_key must resolve to exactly one keycode.")
+            quit_code = int(q[0])
+
+        # Read codes: include quit_code for monitoring, but do NOT include it in snapshots/bins
+        if quit_code is not None and quit_code not in target_codes:
+            read_codes = list(target_codes) + [quit_code]
+        else:
+            read_codes = list(target_codes)
+
+        # --- clock anchoring ---
         anchor_perf_ns = time.perf_counter_ns()
         anchor_mono_ns = time.monotonic_ns()
 
@@ -907,24 +901,21 @@ class WOOTING_ACQUISITION:
             if trial_start_clock == "perf":
                 trial_start_perf_ns = int(trial_start_ns)
             else:
-                # Convert monotonic_ns -> perf_counter_ns via the measured offset.
                 trial_start_perf_ns = int(anchor_perf_ns + (int(trial_start_ns) - int(anchor_mono_ns)))
-       
-        # remember for logging metadata (written into the per-trial shard)
+
+        # --- callback deadline ---
+        callback_done = False
+        callback_deadline_perf_ns = None
+        if callback is not None:
+            callback_deadline_perf_ns = int(trial_start_perf_ns + callback_delay * 1e9)
+
         self._last_trial_start_perf_ns = int(trial_start_perf_ns)
         self._last_stim_on_clock = str(trial_start_clock)
 
-        buffer_pre_threshold: List[Dict[str, Union[int, float]]] = []
+        buffer_pre_threshold = []
         triggered = False
-        trigger_perf_ns: Optional[int] = None
-
+        trigger_perf_ns = None
         bins: Dict[Tuple[int, int], List[Tuple[float, float, float]]] = {}
-
-        if verbose:
-            chosen = self._choose_backend(target_codes)
-            print(f"Waiting for any key in {target_codes} to exceed threshold {self.threshold}...")
-            print(f"(backend will be: {chosen} | timing_mode={self.timing_mode})")
-            print(f"(trial_start_clock={trial_start_clock} | trial_start_perf_ns={trial_start_perf_ns})")
 
         next_t = time.perf_counter()
         interval = float(sampling_interval)
@@ -933,7 +924,23 @@ class WOOTING_ACQUISITION:
             sample_perf_ns = time.perf_counter_ns()
             sample_epoch_ns = time.time_ns()
 
-            pos_map = self._read_positions_for_targets(target_codes)
+            # --- timed callback ---
+            if callback is not None and not callback_done and not triggered:
+                if sample_perf_ns >= callback_deadline_perf_ns:
+                    try:
+                        callback()
+                    except Exception as e:
+                        raise RuntimeError("Timed callback failed.") from e
+                    callback_done = True
+
+            pos_map = self._read_positions_for_targets(read_codes)
+
+            # --- detect quit key (does NOT stop trial) ---
+            if quit_code is not None and not quit_pressed:
+                if float(pos_map.get(quit_code, 0.0)) > 0.0:
+                    quit_pressed = True
+                    if verbose:
+                        print(f"[quit_key] Detected press on {quit_key!r}")
 
             snapshot = [
                 {
@@ -950,13 +957,7 @@ class WOOTING_ACQUISITION:
                     if s["position"] >= self.threshold:
                         trigger_perf_ns = int(sample_perf_ns)
                         triggered = True
-                        if verbose:
-                            ch = convert_char_to_keycode([int(s["key"])])
-                            ch = ch[0] if ch else "?"
-                            print(
-                                f"\nThreshold reached on key {s['key']} ({ch}) "
-                                f"| backend={self.last_backend}"
-                            )
+                        callback_done = True
                         break
                 buffer_pre_threshold.extend(snapshot)
 
@@ -964,33 +965,31 @@ class WOOTING_ACQUISITION:
                 for s in snapshot:
                     tth = (int(s["perf_ns"]) - int(trial_start_perf_ns)) / 1e9
                     tabs = int(s["epoch_ns"]) / 1e9
-                    pos = float(s["position"])
-                    bins.setdefault((self.trial, int(s["key"])), []).append((tth, tabs, pos))
+                    bins.setdefault((self.trial, int(s["key"])), []).append(
+                        (tth, tabs, float(s["position"]))
+                    )
 
-                if (sample_perf_ns - int(trigger_perf_ns)) / 1e9 >= duration_after_threshold:
+                if (sample_perf_ns - trigger_perf_ns) / 1e9 >= duration_after_threshold:
                     break
 
             next_t += interval
             self._wait_until_next_tick(next_t)
 
-        if trigger_perf_ns is None:
-            raise RuntimeError("Internal error: trigger time was not set.")
-
         for s in buffer_pre_threshold:
-            dt_to_trigger = (int(s["perf_ns"]) - int(trigger_perf_ns)) / 1e9
-            if duration_before_threshold is None or abs(float(dt_to_trigger)) <= float(duration_before_threshold):
+            dt = (int(s["perf_ns"]) - trigger_perf_ns) / 1e9
+            if duration_before_threshold is None or abs(dt) <= duration_before_threshold:
                 tth = (int(s["perf_ns"]) - int(trial_start_perf_ns)) / 1e9
                 tabs = int(s["epoch_ns"]) / 1e9
-                pos = float(s["position"])
-                bins.setdefault((self.trial, int(s["key"])), []).append((float(tth), float(tabs), float(pos)))
+                bins.setdefault((self.trial, int(s["key"])), []).append(
+                    (tth, tabs, float(s["position"]))
+                )
 
-        if verbose:
-            total = sum(len(v) for v in bins.values())
-            print(f"Acquisition complete ({total} samples captured). backend={self.last_backend}")
+        hier = self._finalize_bins_to_hier(bins)
 
-        return self._finalize_bins_to_hier(bins)
-
-
+        if quit_code is not None:
+            return hier, bool(quit_pressed)
+        return hier
+    
     def acquire_analog_values(
         self,
         target_keys: Sequence[Union[str, int]],
@@ -1000,13 +999,95 @@ class WOOTING_ACQUISITION:
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
         trial_start_clock: str = "perf",
+        callback=None,
+        callback_delay=None,
+        quit_key: Optional[Union[str, int]] = None,
     ):
         """
-        Acquire analog samples (0..1) for the given target keys around a threshold crossing.
+        Acquire analog key trajectories (0.0–1.0) around a threshold crossing.
 
-        trial_start_ns / trial_start_clock:
-        - If trial_start_clock == "perf": pass time.perf_counter_ns()
-        - If trial_start_clock == "mono": pass time.monotonic_ns() (e.g. tachypy Screen.flip())
+        This user-facing function blocks until any of the `target_keys` crosses the
+        acquisition threshold, then continues sampling for `duration_after_threshold`
+        seconds. It also retains up to `duration_before_threshold` seconds of samples
+        collected before the threshold crossing.
+
+        Timing / alignment
+        ------------------
+        Internally, samples are timestamped with `time.perf_counter_ns()` (high-resolution,
+        monotonic). If you provide `trial_start_ns` (typically stimulus onset), it is
+        used as the reference to compute `time_to_threshold` (seconds since onset).
+
+        Optional timed callback
+        -----------------------
+        You may provide a `callback` and `callback_delay` to execute a one-shot action
+        at a precise time after `trial_start_ns`, *unless* the threshold is reached first.
+        This is useful to display a stimulus or send a marker while preserving a single
+        continuous acquisition timeline.
+
+        Optional quit-key detection (no forced exit)
+        -------------------------------------------
+        If `quit_key` is provided, the function monitors that key during the trial and
+        returns a boolean flag indicating whether it was pressed at least once.
+        IMPORTANT: pressing `quit_key` does NOT stop acquisition; it only sets the flag.
+
+        Parameters
+        ----------
+        target_keys : sequence of str or int
+            Keys to monitor (characters like 'A' or integer keycodes).
+
+        duration_after_threshold : float, default=0.5
+            Duration (seconds) to keep sampling after the threshold is crossed.
+
+        duration_before_threshold : float, default=0.2
+            Maximum duration (seconds) of samples retained before the threshold crossing.
+
+        sampling_interval : float, default=1/8000
+            Target sampling interval (seconds). Actual timing depends on OS scheduling.
+
+        verbose : bool, default=False
+            If True, prints debug information (backend selection, trigger, etc.).
+
+        trial_start_ns : int or None, default=None
+            Timestamp for stimulus onset or other reference event.
+            If None, acquisition start is used.
+
+        trial_start_clock : {'perf', 'mono'}, default='perf'
+            Clock domain of `trial_start_ns`:
+            - 'perf': `time.perf_counter_ns()`
+            - 'mono': `time.monotonic_ns()` (e.g., tachypy/SDL)
+            If 'mono', it is projected into the perf_counter domain at acquisition start.
+
+        callback : callable or None, default=None
+            Optional one-shot callable (no args) executed after `callback_delay` seconds
+            from `trial_start_ns`, unless the threshold occurs first (then it is canceled).
+
+        callback_delay : float or None, default=None
+            Delay (seconds) after `trial_start_ns` at which to execute `callback`.
+            Must be > 0 if `callback` is provided.
+
+        quit_key : str or int or None, default=None
+            Optional key to monitor during acquisition (e.g., 'Esc').
+            If provided, the function returns `(hier, quit_pressed)`.
+
+        Returns
+        -------
+        hier : dict
+            Hierarchical structure containing analog trajectories for each target key:
+                hier[trial_id][keycode]['time_to_threshold']  (seconds since trial_start)
+                hier[trial_id][keycode]['time_abs']           (seconds since epoch)
+                hier[trial_id][keycode]['position']           (float in [0, 1])
+
+        (hier, quit_pressed) : tuple
+            Returned only if `quit_key` is provided.
+            `quit_pressed` is True if `quit_key` was pressed at least once during the trial.
+
+        Raises
+        ------
+        ValueError
+            If the keyboard is not initialized or parameters are invalid.
+
+        RuntimeError
+            If the timed callback raises an exception.
         """
         if not self.initialized:
             raise ValueError('Keyboard must be initialized through "initialize_keyboard()".')
@@ -1016,7 +1097,7 @@ class WOOTING_ACQUISITION:
                 "Use acquire_integer_values instead."
             )
 
-        hier = self._acquire_raw_values(
+        result = self._acquire_raw_values(
             target_keys=target_keys,
             duration_after_threshold=duration_after_threshold,
             duration_before_threshold=duration_before_threshold,
@@ -1024,13 +1105,24 @@ class WOOTING_ACQUISITION:
             verbose=verbose,
             trial_start_ns=trial_start_ns,
             trial_start_clock=trial_start_clock,
+            callback=callback,
+            callback_delay=callback_delay,
+            quit_key=quit_key,
         )
+
+        # Unpack for logging: logging expects the dict
+        if isinstance(result, tuple):
+            hier, quit_pressed = result
+        else:
+            hier, quit_pressed = result, None
 
         if self.logging_enabled and self.int_analog == 2:
             self._write_hdf5_trial_shard(hier)
 
         self.trial += 1
-        return hier
+
+        # Keep return shape consistent with quit_key usage
+        return (hier, quit_pressed) if quit_key is not None else hier
 
 
     def acquire_integer_values(
@@ -1042,13 +1134,48 @@ class WOOTING_ACQUISITION:
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
         trial_start_clock: str = "perf",
+        callback=None,
+        callback_delay=None,
+        quit_key: Optional[Union[str, int]] = None,
     ):
         """
-        Acquire integer samples (0..255) for the given target keys around a threshold crossing.
+        Acquire quantized (integer) key trajectories (0–255) around a threshold crossing.
 
-        trial_start_ns / trial_start_clock:
-        - If trial_start_clock == "perf": pass time.perf_counter_ns()
-        - If trial_start_clock == "mono": pass time.monotonic_ns() (e.g. tachypy Screen.flip())
+        Identical to `acquire_analog_values`, except the returned positions are quantized
+        to integer values in [0, 255] (rounded analog_value * 255). This is mainly useful
+        for logging/storage pipelines that expect integer analog data.
+
+        Optional timed callback
+        -----------------------
+        Same semantics as `acquire_analog_values`: a one-shot `callback()` can be executed
+        after `callback_delay` seconds from `trial_start_ns`, unless the threshold occurs
+        first (then it is canceled).
+
+        Optional quit-key detection (no forced exit)
+        -------------------------------------------
+        If `quit_key` is provided, the function returns `(hier, quit_pressed)` where
+        `quit_pressed` indicates whether the quit key was pressed at least once during
+        the trial. Pressing the quit key does NOT stop acquisition.
+
+        Parameters
+        ----------
+        (Same as acquire_analog_values; see that docstring for full details.)
+
+        Returns
+        -------
+        hier : dict
+            Same hierarchical structure, but `position` arrays are integers in [0, 255].
+
+        (hier, quit_pressed) : tuple
+            Returned only if `quit_key` is provided.
+
+        Raises
+        ------
+        ValueError
+            If the keyboard is not initialized or parameters are invalid.
+
+        RuntimeError
+            If the timed callback raises an exception.
         """
         if not self.initialized:
             raise ValueError('Keyboard must be initialized through "initialize_keyboard()".')
@@ -1058,7 +1185,7 @@ class WOOTING_ACQUISITION:
                 "Use acquire_analog_values instead."
             )
 
-        hier = self._acquire_raw_values(
+        result = self._acquire_raw_values(
             target_keys=target_keys,
             duration_after_threshold=duration_after_threshold,
             duration_before_threshold=duration_before_threshold,
@@ -1066,17 +1193,29 @@ class WOOTING_ACQUISITION:
             verbose=verbose,
             trial_start_ns=trial_start_ns,
             trial_start_clock=trial_start_clock,
+            callback=callback,
+            callback_delay=callback_delay,
+            quit_key=quit_key,
         )
 
+        if isinstance(result, tuple):
+            hier, quit_pressed = result
+        else:
+            hier, quit_pressed = result, None
+
+        # Quantize positions to int in [0, 255]
         for _, keys in hier.items():
             for _, serie in keys.items():
-                serie["position"] = np.rint(np.asarray(serie["position"], dtype=np.float64) * 255.0).astype(np.int16)
+                serie["position"] = np.rint(
+                    np.asarray(serie["position"], dtype=np.float64) * 255.0
+                ).astype(np.int16)
 
         if self.logging_enabled and self.int_analog == 1:
             self._write_hdf5_trial_shard(hier)
 
         self.trial += 1
-        return hier
+
+        return (hier, quit_pressed) if quit_key is not None else hier
 
     def wait_keys_light_press(
         self,

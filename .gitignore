@@ -1,0 +1,16 @@
+# Python bytecode / cache
+__pycache__/
+**/__pycache__/
+
+# Compiled extensions
+*.so
+*.o
+*.pyd
+
+# Setuptools / pip artifacts
+*.egg-info/
+**/*.egg-info/
+
+# Ignore interface build artifacts but keep package marker
+wooting_package/interface/*
+!wooting_package/interface/__init__.py
