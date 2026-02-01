@@ -82,7 +82,8 @@ def get_platform_config(library_dir):
             f'-I{library_dir}',
         ]
         # ELF: $ORIGIN resolves to the directory of the loaded binary
-        extra_link_args = ['-Wl,-rpath,$ORIGIN/../libraries/linux']
+        # -Wl,-rpath-link allows the linker to find dependencies during compilation
+        extra_link_args = ['-Wl,-rpath,$ORIGIN/../libraries/linux', f'-Wl,-rpath-link,{library_dir}']
         system_libs = []
     else:  # Windows
         compile_args = [
@@ -124,6 +125,20 @@ def build_interface():
     ffib.cdef(wrapper_header_code)
     cfg = get_platform_config(library_dir)
 
+    # On Linux, CFFI may have trouble finding shared libraries by name.
+    # Provide full paths to the .so files as extra_objects instead.
+    system = platform.system().lower()
+    extra_objects = []
+    if system == 'linux':
+        sdk_so = os.path.join(library_dir, f"lib{SDK_LIBRARY_NAME}.so")
+        wrapper_so = os.path.join(library_dir, f"lib{WRAPPER_LIBRARY_NAME}.so")
+        if os.path.isfile(sdk_so):
+            extra_objects.append(sdk_so)
+            print(f"\t  SDK library: {sdk_so}")
+        if os.path.isfile(wrapper_so):
+            extra_objects.append(wrapper_so)
+            print(f"\t  Wrapper library: {wrapper_so}")
+
     # Keep the module name 'wooting_interface' (import via: from interface import lib, ffi)
     ffib.set_source(
         'wooting_interface',
@@ -132,6 +147,7 @@ def build_interface():
         library_dirs=[library_dir],
         extra_compile_args=cfg['compile_args'],
         extra_link_args=cfg['extra_link_args'],
+        extra_objects=extra_objects,
     )
 
     # CFFI writes the .so into the current working directory: switch to INTERFACE_DIR
