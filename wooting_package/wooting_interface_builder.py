@@ -66,16 +66,30 @@ def get_library_dir():
     else : # no arch subfolder
         return base_dir
 
+def get_library_dir():
+    """Return the correct library directory based on platform and architecture."""
+    base_dir = os.path.join(LIBRARIES_DIR, system)
+    if system == "darwin":  # .../libraries/darwin/arm64 or x86_64
+        arch = _norm_arch()
+        return os.path.join(base_dir, arch)
+    else:
+        # linux/windows: pas de sous-dossier d'archi dans ton layout actuel
+        return base_dir
+            
 def get_platform_config(library_dir):
     """Return platform-specific compile/link configuration."""
     arch = _norm_arch()
+
     if system == 'darwin':  # macOS
         compile_args = [
             f'-I{library_dir}',  # headers
         ]
         # rpath must include the arch subfolder so the .so finds the dylibs next to the package
-        extra_link_args = [f'-Wl,-rpath,@loader_path/../libraries/darwin/{arch}']
+        extra_link_args = [
+            f'-Wl,-rpath,@loader_path/../libraries/darwin/{arch}'
+        ]
         system_libs = []
+
     elif system == 'Linux':
         compile_args = [
             '-Wall', '-Wextra', '-g', '-O0',
@@ -83,8 +97,11 @@ def get_platform_config(library_dir):
         ]
         # ELF: $ORIGIN resolves to the directory of the loaded binary
         # -Wl,-rpath-link allows the linker to find dependencies during compilation
-        extra_link_args = ['-Wl,-rpath,$ORIGIN/../libraries/linux', f'-Wl,-rpath-link,{library_dir}']
+        extra_link_args = [
+            '-Wl,-rpath,$ORIGIN/../libraries/linux'
+        ]
         system_libs = []
+
     else:  # Windows
         compile_args = [
             '/W4',  # warnings
@@ -92,7 +109,9 @@ def get_platform_config(library_dir):
             '/Od',  # no optimization (dev)
         ]
         extra_link_args = []  # rpath is not used on Windows
-        system_libs = ['ws2_32', 'kernel32', 'advapi32', 'ntdll', 'bcrypt', 'userenv']
+        system_libs = [
+            'ws2_32', 'kernel32', 'advapi32', 'ntdll', 'bcrypt', 'userenv'
+        ]
 
     return {
         'compile_args': compile_args,
@@ -100,8 +119,9 @@ def get_platform_config(library_dir):
         'system_libs': system_libs,
     }
 
+
 def build_interface():
-    """Build the Python interface for the Wooting Analog SDK."""
+    """Build the Python interface for the Wooting Analog SDK.""" # OLD
     print("\n\nBuilding Wooting interface...")
     library_dir = get_library_dir()
     print(f"\n\tUsing libraries from: {library_dir}")
@@ -125,19 +145,6 @@ def build_interface():
     ffib.cdef(wrapper_header_code)
     cfg = get_platform_config(library_dir)
 
-    # On Linux, CFFI may have trouble finding shared libraries by name.
-    # Provide full paths to the .so files as extra_objects instead.
-    system = platform.system().lower()
-    extra_objects = []
-    if system == 'linux':
-        sdk_so = os.path.join(library_dir, f"lib{SDK_LIBRARY_NAME}.so")
-        wrapper_so = os.path.join(library_dir, f"lib{WRAPPER_LIBRARY_NAME}.so")
-        if os.path.isfile(sdk_so):
-            extra_objects.append(sdk_so)
-            print(f"\t  SDK library: {sdk_so}")
-        if os.path.isfile(wrapper_so):
-            extra_objects.append(wrapper_so)
-            print(f"\t  Wrapper library: {wrapper_so}")
 
     # Keep the module name 'wooting_interface' (import via: from interface import lib, ffi)
     ffib.set_source(
@@ -147,10 +154,8 @@ def build_interface():
         library_dirs=[library_dir],
         extra_compile_args=cfg['compile_args'],
         extra_link_args=cfg['extra_link_args'],
-        extra_objects=extra_objects,
     )
 
-    # CFFI writes the .so into the current working directory: switch to INTERFACE_DIR
     old_cwd = os.getcwd()
     try:
         os.chdir(INTERFACE_DIR)
@@ -163,6 +168,7 @@ def build_interface():
         raise
     finally:
         os.chdir(old_cwd)
-    
+
+
 if __name__ == "__main__":
     build_interface()
