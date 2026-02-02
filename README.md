@@ -16,7 +16,95 @@ A Python interface for the Wooting Analog SDK that enables reading analog key va
 ## Installation
 
 ```bash
+pip install .
+```
+
+Or for development mode:
+```bash
 pip install -e .
+```
+
+### What happens during installation
+
+The installation automatically:
+1. **Compiles the CFFI interface** - Creates Python bindings for the Wooting SDK
+2. **Sets up USB permissions** (Linux/macOS) - Configures udev rules following [Wootility recommendations](https://help.wooting.io/article/12-configuring-device-access-for-wootility-under-linux)
+3. **Installs system plugins** - Deploys SDK and plugins to system directories
+
+*Note: Steps 2 and 3 require sudo/admin privileges on Linux/macOS.*
+
+### System Files Installed
+
+| Platform | SDK Location | Plugin Location | Permissions |
+|----------|-------------|-----------------|-------------|
+| **Linux** | `/usr/local/lib/libwooting_analog_sdk.so` | `/usr/local/share/WootingAnalogPlugins/` | `/etc/udev/rules.d/70-wooting.rules`<br>(MODE 0660, GROUP input, TAG uaccess) |
+| **macOS** | `/usr/local/lib/libwooting_analog_sdk.dylib` | `/usr/local/share/WootingAnalogPlugins/` | N/A |
+| **Windows** | `C:\Program Files\WootingAnalogPlugins\` | Same as SDK | N/A |
+
+### Plugin Management
+
+For manual plugin installation, uninstallation, or troubleshooting, see [PLUGIN_MANAGEMENT.md](PLUGIN_MANAGEMENT.md).
+
+#### CLI Commands:
+```bash
+# Install plugins manually
+wooting-install-plugins
+
+# Uninstall plugins
+wooting-uninstall-plugins
+
+# Complete cleanup (interface + plugins)
+wooting-delete-interface --cleanup-plugins
+```
+
+#### Python API:
+```python
+# Manual installation
+from wooting_package.post_install import install_plugins
+install_plugins()
+
+# Uninstall plugins only
+from wooting_package.post_install import uninstall_plugins
+uninstall_plugins()
+
+# Complete cleanup (interface + plugins)
+from wooting_package.wooting_utils import delete_interface
+delete_interface(cleanup_plugins=True)
+```
+
+### Testing Installation
+
+After installation, verify everything works:
+
+```bash
+wooting-demo
+```
+
+This demo monitors key presses and displays analog values in real-time.
+
+### Command Line Tools
+
+The package provides several CLI tools:
+
+| Command | Description |
+|---------|-------------|
+| `wooting-demo` | Interactive analog key monitor with real-time visualization |
+| `wooting-install-plugins` | Manually install SDK and plugins to system directories |
+| `wooting-uninstall-plugins` | Remove SDK and plugins from system |
+| `wooting-delete-interface` | Clean up compiled interface (add `--cleanup-plugins` to also remove plugins) |
+
+**Examples:**
+```bash
+# Test keyboard
+wooting-demo -k A
+
+# Manual plugin management
+wooting-install-plugins
+wooting-uninstall-plugins
+
+# Cleanup
+wooting-delete-interface                    # Interface only
+wooting-delete-interface --cleanup-plugins  # Interface + plugins
 ```
 
 ---
@@ -24,42 +112,52 @@ pip install -e .
 ## Project Structure
 
 ```
-wooting-keyboard/
-├── setup.py
+wooting-analog/
+├── setup.py                          # Installation with post-install hooks
+├── pyproject.toml                    # Modern Python package configuration
 ├── requirements.txt
-├── wooting_package
-    ├── text_extraction.py
-    ├── wooting_interface_builder.py
-    ├── wooting_utils.py
-    ├── visualize.py           # quick HDF5 visualizer
-    ├── interface
-        ├── ...                         # Built interface
-        └── __init__.py 
-    ├── librairies                      # [Wooting components and headers](https://github.com/WootingKb/wooting-analog-sdk/releases) 
-        ├── darwin
-        ├── linux
-        └── windows
-    └── permissions
-        ├── PERMISSIONS_linux.sh
-        └── PERMISSIONS_linux.sh
+├── PLUGIN_MANAGEMENT.md              # Detailed plugin management guide
+├── example_plugin_management.py      # Interactive plugin management script
+└── wooting_package/
+    ├── __init__.py                   # Auto-initialization logic
+    ├── cli.py                        # wooting-demo CLI tool
+    ├── post_install.py               # Installation and plugin management
+    ├── wooting_utils.py              # High-level acquisition API
+    ├── wooting_interface_builder.py  # CFFI interface builder
+    ├── text_extraction.py            # Header parser for CFFI
+    ├── visualize.py                  # HDF5 data visualizer
+    ├── interface/                    # Compiled CFFI bindings (generated)
+    │   ├── __init__.py
+    │   └── wooting_interface*.so     # Platform-specific binary
+    ├── libraries/                    # Native SDK libraries per platform
+    │   ├── linux/
+    │   ├── darwin/
+    │   └── windows/
+    └── permissions/                  # Platform-specific permission scripts
+        ├── PERMISSIONS_linux.sh      # Udev rules setup (Wootility spec)
+        └── PERMISSIONS_mac.sh        # macOS Gatekeeper setup
 ```
----
-
-## Permissions (macOS & Linux)
-
-Scripts are provided in the `permissions/` folder:
-
-- **PERMISSIONS_mac.sh** and **PERMISSIONS_linux.sh**  
-  These scripts set the correct permissions on native libraries (`.dylib`/`.so`) required by the Wooting SDK.  
-  On Linux, the script ensures your user has access to the USB port connected to the keyboard, which is necessary for communication with the device.  
-  Run the appropriate script for your OS after cloning the project to avoid library loading errors.
 
 ---
 
-## Automatic Initialization
+## Linux Permissions (Udev Rules)
 
-Importing the package triggers initialization behavior via `wooting_package/__init__.py`. The package attempts to prepare the CFFI interface so that `lib` / `ffi` are available. You can still call initialization explicitly via the acquisition class methods (recommended to verify the device).
+On Linux, the installation automatically creates `/etc/udev/rules.d/70-wooting.rules` following [Wootility's official recommendations](https://help.wooting.io/article/12-configuring-device-access-for-wootility-under-linux):
 
+- **MODE 0660**: Read/write for owner and group only (secure)
+- **GROUP input**: Standard input device group
+- **TAG uaccess**: ACL for currently logged-in user
+
+This configuration:
+- Supports all Wooting models (One, Two, UwU, 60HE, etc.)
+- Includes update modes for firmware flashing
+- Works with snap Chromium installations
+- No manual group membership required
+
+The rules are applied automatically during installation. If you encounter permission issues:
+1. Unplug and replug the keyboard
+2. Verify rules: `cat /etc/udev/rules.d/70-wooting.rules`
+3. Check permissions: `ls -l /dev/hidraw*`
 
 ---
 

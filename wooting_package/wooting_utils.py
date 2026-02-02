@@ -1542,8 +1542,15 @@ class WOOTING_ACQUISITION:
 # Maintenance helper
 # ============================================================
 
-def delete_interface(file: Optional[str] = None):
-    """Remove compiled CFFI artifacts and common build leftovers."""
+def delete_interface(file: Optional[str] = None, cleanup_plugins: bool = False):
+    """
+    Remove compiled CFFI artifacts and common build leftovers.
+    
+    Args:
+        file: Optional specific file to delete in addition to standard cleanup.
+        cleanup_plugins: If True, also removes system-wide installed plugins.
+                        This requires sudo/admin privileges on Linux/macOS.
+    """
     interface_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "interface")
     pattern = os.path.join(interface_dir, "wooting_interface*")
     files = glob.glob(pattern)
@@ -1580,3 +1587,70 @@ def delete_interface(file: Optional[str] = None):
             shutil.rmtree(egg_info_dir)
         except Exception:
             pass
+    
+    # Cleanup plugins if requested
+    if cleanup_plugins:
+        try:
+            # Set environment variable to skip auto-setup, then import uninstall function
+            os.environ['WOOTING_SKIP_SETUP'] = '1'
+            from wooting_package.post_install import uninstall_plugins
+            uninstall_plugins()
+        except Exception as e:
+            print(f"Warning: Failed to uninstall plugins: {e}")
+        finally:
+            # Clean up environment variable
+            os.environ.pop('WOOTING_SKIP_SETUP', None)
+
+
+def main_delete_interface():
+    """CLI entry point for delete_interface command."""
+    import argparse
+    import os
+    
+    # Parse args first to check if we need to skip setup
+    parser = argparse.ArgumentParser(
+        description='Clean up Wooting interface and optionally remove system plugins',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  wooting-delete-interface                 # Remove interface only
+  wooting-delete-interface --cleanup-plugins  # Remove interface + plugins
+        """
+    )
+    parser.add_argument(
+        '--cleanup-plugins',
+        action='store_true',
+        help='Also remove system-wide installed plugins (requires sudo/admin)'
+    )
+    parser.add_argument(
+        '--file',
+        type=str,
+        help='Additional file to delete'
+    )
+    
+    args = parser.parse_args()
+    
+    # If cleaning up plugins, skip auto-setup to avoid reinstalling
+    if args.cleanup_plugins:
+        os.environ['WOOTING_SKIP_SETUP'] = '1'
+    
+    try:
+        print("\n[Wooting] Cleaning up interface...")
+        if args.cleanup_plugins:
+            print("[Wooting] Plugins will also be removed...")
+        
+        delete_interface(file=args.file, cleanup_plugins=args.cleanup_plugins)
+        
+        print("[Wooting] Cleanup completed successfully.\n")
+    except KeyboardInterrupt:
+        print("\n[Wooting] Cleanup cancelled by user.")
+        import sys
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[Wooting] Cleanup failed: {e}")
+        import sys
+        sys.exit(1)
+    finally:
+        # Clean up environment variable
+        os.environ.pop('WOOTING_SKIP_SETUP', None)
+
