@@ -32,6 +32,7 @@ Script is called in the __init__.py
 The script detects the platform and uses the appropriate build settings.
 """
 import os
+import sysconfig
 import platform
 import subprocess
 from cffi import FFI
@@ -80,6 +81,9 @@ def get_platform_config(library_dir):
     """Return platform-specific compile/link configuration."""
     arch = _norm_arch()
 
+    # This ensures that the compiler can find the Python C headers required to build the CFFI extension.
+    py_inc = sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_paths()["include"]
+
     if system == 'darwin':  # macOS
         compile_args = [
             f'-I{library_dir}',  # headers
@@ -90,10 +94,11 @@ def get_platform_config(library_dir):
         ]
         system_libs = []
 
-    elif system == 'Linux':
+    elif system == 'linux':
         compile_args = [
             '-Wall', '-Wextra', '-g', '-O0',
             f'-I{library_dir}',
+            f'-I{py_inc}',
         ]
         # ELF: $ORIGIN resolves to the directory of the loaded binary
         # -Wl,-rpath-link allows the linker to find dependencies during compilation
