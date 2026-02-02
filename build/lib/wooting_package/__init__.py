@@ -28,13 +28,23 @@ def _ensure_setup_complete() -> None:
     """
     Ensure post-installation setup is complete.
     This runs automatically on first import if the interface is not yet built.
+    
+    Can be skipped by setting WOOTING_SKIP_SETUP environment variable.
     """
+    # Allow skipping setup (useful for cleanup operations)
+    if os.environ.get('WOOTING_SKIP_SETUP'):
+        return
+    
     if _compiled_interface_present():
         return  # already set up
 
     # Run post-installation setup
     from .post_install import run_post_install
     run_post_install()
+
+
+# Mark first import for potential setup
+_first_import = True
 
 
 

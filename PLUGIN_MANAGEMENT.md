@@ -1,171 +1,270 @@
-# Wooting Plugin Management
+# Plugin Management Guide
 
 ## Overview
 
-The Wooting SDK requires system plugins to function. These plugins enable the SDK to communicate with Wooting keyboards.
+The Wooting SDK requires system plugins to communicate with keyboards. This guide explains how to install, verify, and troubleshoot the plugin installation.
 
 ## Automatic Installation
 
-Plugins are automatically installed during package installation or when running `wooting-demo` for the first time. The following files are installed:
+Plugins are automatically installed during the first use of the package:
+
+1. **First time you run** `wooting-demo` or import the package
+2. The package detects that plugins are missing
+3. Automatically runs the complete setup (permissions → interface → plugins)
+4. SDK and plugins are installed to system directories
+
+No manual intervention required for most users!
+
+## System Installation Paths
 
 ### Linux
-- **SDK**: `/usr/local/lib/libwooting_analog_sdk.so`
-- **Plugin**: `/usr/local/share/WootingAnalogPlugins/libwooting_analog_plugin.so`
-- **Udev rules**: `/etc/udev/rules.d/70-wooting.rules` (MODE 0660, GROUP input, TAG uaccess)
+| Component | Location |
+|-----------|----------|
+| SDK | `/usr/local/lib/libwooting_analog_sdk.so` |
+| Plugin | `/usr/local/share/WootingAnalogPlugins/libwooting_analog_plugin.so` |
+| Permissions | `/etc/udev/rules.d/70-wooting.rules` |
 
 ### macOS
-- **SDK**: `/usr/local/lib/libwooting_analog_sdk.dylib`
-- **Plugin**: `/usr/local/share/WootingAnalogPlugins/libwooting_analog_plugin.dylib`
+| Component | Location |
+|-----------|----------|
+| SDK | `/usr/local/lib/libwooting_analog_sdk.dylib` |
+| Plugin | `/usr/local/share/WootingAnalogPlugins/libwooting_analog_plugin.dylib` |
+| Gatekeeper | Automatic (handled during setup) |
 
 ### Windows
-- **SDK & Plugin**: `C:\Program Files\WootingAnalogPlugins\`
+| Component | Location |
+|-----------|----------|
+| SDK & Plugin | `C:\Program Files\WootingAnalogPlugins\` |
 
-## Manual Installation
+## Manual Plugin Management
 
-### Using CLI:
+### Install Plugins
+
+If you need to manually install or reinstall plugins:
+
+**CLI:**
 ```bash
 wooting-install-plugins
 ```
 
-### Using Python:
+**Python API:**
 ```python
 from wooting_package.post_install import install_plugins
 install_plugins()
 ```
 
-**Note**: Requires sudo/admin privileges on Linux/macOS.
+### Uninstall Plugins Only
 
-## Uninstallation
-
-### Option 1: Complete uninstallation (interface + plugins)
-
-**CLI:**
-```bash
-wooting-delete-interface --cleanup-plugins
-```
-
-**Python:**
-```python
-from wooting_package.wooting_utils import delete_interface
-delete_interface(cleanup_plugins=True)
-```
-
-### Option 2: Plugins only
+Remove SDK and plugins but keep the Python interface:
 
 **CLI:**
 ```bash
 wooting-uninstall-plugins
 ```
 
-**Python:**
+**Python API:**
 ```python
 from wooting_package.post_install import uninstall_plugins
 uninstall_plugins()
 ```
 
-### Option 3: Interface only
+### Clean Everything
+
+Remove interface, plugins, and all system files (for complete reinstall):
+
+**CLI:**
+```bash
+wooting-delete-interface --cleanup-plugins
+```
+
+This removes:
+- Compiled CFFI interface files
+- Python `__pycache__` directories
+- SDK from system directories
+- Plugins from system directories
+- Udev rules (Linux only)
+
+**Python API:**
+```python
+from wooting_package.wooting_utils import delete_interface
+delete_interface(cleanup_plugins=True)
+```
+
+### Clean Interface Only
+
+Remove compiled interface without touching system plugins:
 
 **CLI:**
 ```bash
 wooting-delete-interface
 ```
 
-**Python:**
+**Python API:**
 ```python
 from wooting_package.wooting_utils import delete_interface
-delete_interface(cleanup_plugins=False)  # or simply delete_interface()
+delete_interface()  # or delete_interface(cleanup_plugins=False)
 ```
 
-## Verify Installation
+## Verification
 
-To verify plugins are correctly installed:
+### Verify Installation
+
+Check if plugins are correctly installed:
 
 ```bash
 # Linux
 ls -lh /usr/local/lib/libwooting_analog_sdk.so
-ls -lh /usr/local/share/WootingAnalogPlugins/
+ls -lh /usr/local/share/WootingAnalogPlugins/libwooting_analog_plugin.so
 
 # macOS
 ls -lh /usr/local/lib/libwooting_analog_sdk.dylib
-ls -lh /usr/local/share/WootingAnalogPlugins/
+ls -lh /usr/local/share/WootingAnalogPlugins/libwooting_analog_plugin.dylib
 
 # Windows
 dir "C:\Program Files\WootingAnalogPlugins"
 ```
 
-## Testing
+### Test Installation
 
-After installation, test with:
+Test that everything is working:
 
 ```bash
 wooting-demo
 ```
 
-Or in Python:
+Or programmatically:
 
 ```python
-from wooting_package.interface import lib, ffi
+from wooting_package.interface import lib
 
-# Initialize SDK
+# Initialize the SDK
 result = lib.wooting_analog_initialise()
-print(f"Devices found: {result}")
 
-# Verify initialization
-is_init = lib.wooting_analog_is_initialised()
-print(f"Initialized: {is_init}")
-
-# Cleanup
-lib.wooting_analog_uninitialise()
+if result > 0:
+    print(f"✓ Found {result} device(s)")
+    lib.wooting_analog_uninitialise()
+else:
+    print(f"✗ Failed to initialize: error code {result}")
 ```
 
 ## Troubleshooting
 
-### Error: "No Wooting devices found"
+### "No Wooting devices found" or "NoPlugins" error (-1995)
 
-1. Verify plugins are installed
-2. Check USB permissions (Linux)
-3. Unplug and replug keyboard
+**Cause**: Plugins are not installed in the system directory
 
-### Error: "NoPlugins" (-1995)
-
-Plugins are not installed in the correct directory. Reinstall:
-
-```python
-from wooting_package.post_install import install_plugins
-install_plugins()
+**Solution**:
+```bash
+wooting-install-plugins
 ```
 
-### Error: Incompatible version
-
-The wrapper and SDK have incompatible versions. Reinstall:
-
-```python
-from wooting_package.post_install import uninstall_plugins, install_plugins
-uninstall_plugins()
-install_plugins()
+Then test again:
+```bash
+wooting-demo
 ```
 
-## Complete Cleanup
+### "Failed to initialize keyboard"
 
-For a complete system cleanup (useful before reinstallation):
+**Common causes**:
+1. Keyboard not connected via USB
+2. Plugins not installed
+3. Permissions issues (Linux)
+4. Version mismatch between wrapper and SDK
 
-```python
-from wooting_package.wooting_utils import delete_interface
+**Steps to diagnose**:
 
-# Remove everything: interface, Python cache, and system plugins
-delete_interface(cleanup_plugins=True)
+```bash
+# 1. Check if keyboard is connected
+lsusb | grep -i wooting          # Linux
+system_profiler SPUSBDataType    # macOS
+
+# 2. Check if plugins are installed
+ls /usr/local/lib/libwooting*
+ls /usr/local/share/WootingAnalogPlugins/
+
+# 3. Check USB permissions (Linux)
+ls -l /dev/hidraw*
+
+# 4. Reinstall everything
+wooting-delete-interface --cleanup-plugins
+# Then run any wooting command to trigger auto-install
+wooting-demo
 ```
 
-This will remove:
-- Compiled CFFI interface
-- `__pycache__` files
-- SDK from `/usr/local/lib/`
-- Plugins from `/usr/local/share/WootingAnalogPlugins/`
+### "Version mismatch" or "Incompatible SDK"
 
-## Security Notes
+This can occur after updating the package but not the system plugins.
 
-- Plugin installation requires sudo/admin privileges
+**Solution**:
+```bash
+# Complete reinstall
+wooting-delete-interface --cleanup-plugins
+
+# Auto-reinstall on next use
+wooting-demo
+```
+
+### macOS: "Code signature invalid"
+
+The Gatekeeper setup should handle code signing automatically, but if you encounter this:
+
+```bash
+# Reinstall and let Gatekeeper setup run
+wooting-install-plugins
+```
+
+### Linux: "Permission denied" when accessing keyboard
+
+**Problem**: User is not in the `input` group or udev rules are not applied
+
+**Solution**:
+
+```bash
+# 1. Verify your user is in input group
+groups $USER | grep input
+
+# 2. If not, add user to group
+sudo usermod -a -G input $USER
+
+# 3. Log out and log back in (or use: newgrp input)
+
+# 4. Verify udev rules
+cat /etc/udev/rules.d/70-wooting.rules
+
+# 5. If missing, reinstall permissions
+wooting-install-plugins
+```
+
+## Advanced: Custom Plugin Paths
+
+For special use cases, you can inspect where plugins are loaded from:
+
+```python
+from wooting_package.interface import lib
+import os
+
+# SDK will look for plugins in:
+# - Linux/macOS: /usr/local/share/WootingAnalogPlugins/
+# - Windows: C:\Program Files\WootingAnalogPlugins\
+
+# To verify, check the system directories
+plugin_dirs = {
+    "Linux": "/usr/local/share/WootingAnalogPlugins/",
+    "macOS": "/usr/local/share/WootingAnalogPlugins/",
+    "Windows": r"C:\Program Files\WootingAnalogPlugins"
+}
+```
+
+## Support
+
+- **Issues?** Check the troubleshooting section above
+- **Still stuck?** Verify file permissions and paths match the platform
+- **Need help?** See [README.md](README.md) for more information
+
+## Security Considerations
+
+- Plugin installation requires `sudo`/admin privileges
 - Files are installed in standard system directories
-- Uninstallation completely removes these files
-- No residual files remain after `delete_interface(cleanup_plugins=True)`
-- Aucun fichier résiduel n'est laissé après `delete_interface(cleanup_plugins=True)`
+- Uninstallation completely removes system files
+- No residual files remain after cleanup
+- All operations are logged to stdout for transparency

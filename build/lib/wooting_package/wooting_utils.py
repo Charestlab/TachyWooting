@@ -1591,16 +1591,23 @@ def delete_interface(file: Optional[str] = None, cleanup_plugins: bool = False):
     # Cleanup plugins if requested
     if cleanup_plugins:
         try:
+            # Set environment variable to skip auto-setup, then import uninstall function
+            os.environ['WOOTING_SKIP_SETUP'] = '1'
             from wooting_package.post_install import uninstall_plugins
             uninstall_plugins()
         except Exception as e:
             print(f"Warning: Failed to uninstall plugins: {e}")
+        finally:
+            # Clean up environment variable
+            os.environ.pop('WOOTING_SKIP_SETUP', None)
 
 
 def main_delete_interface():
     """CLI entry point for delete_interface command."""
     import argparse
+    import os
     
+    # Parse args first to check if we need to skip setup
     parser = argparse.ArgumentParser(
         description='Clean up Wooting interface and optionally remove system plugins',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1623,6 +1630,10 @@ Examples:
     
     args = parser.parse_args()
     
+    # If cleaning up plugins, skip auto-setup to avoid reinstalling
+    if args.cleanup_plugins:
+        os.environ['WOOTING_SKIP_SETUP'] = '1'
+    
     try:
         print("\n[Wooting] Cleaning up interface...")
         if args.cleanup_plugins:
@@ -1639,4 +1650,7 @@ Examples:
         print(f"\n[Wooting] Cleanup failed: {e}")
         import sys
         sys.exit(1)
+    finally:
+        # Clean up environment variable
+        os.environ.pop('WOOTING_SKIP_SETUP', None)
 

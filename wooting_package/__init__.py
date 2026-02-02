@@ -43,6 +43,10 @@ def _ensure_setup_complete() -> None:
     run_post_install()
 
 
+# Mark first import for potential setup
+_first_import = True
+
+
 
 # Run setup if needed (only once, on first import)
 _ensure_setup_complete()

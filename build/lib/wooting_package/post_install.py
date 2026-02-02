@@ -56,6 +56,8 @@ def setup_permissions() -> None:
     """
     Run platform-specific permission script only if the interface
     is not yet compiled. No-op if compiled or on unsupported OS.
+    
+    NOTE: This is called during post-installation, not on every import.
     """
     if _compiled_interface_present():
         return  # already compiled ⇒ do nothing
@@ -190,6 +192,7 @@ def uninstall_plugins() -> None:
     Removes:
     - SDK library from /usr/local/lib/ (Linux/macOS)
     - Plugin directory /usr/local/share/WootingAnalogPlugins/
+    - Udev rules /etc/udev/rules.d/70-wooting.rules (Linux)
     
     Requires sudo/admin privileges on Linux/macOS.
     """
@@ -234,6 +237,18 @@ def uninstall_plugins() -> None:
             
             # Update library cache
             subprocess.run(["sudo", "ldconfig"], check=False)
+        
+        # Remove udev rules on Linux
+        if system == "Linux":
+            udev_rules = "/etc/udev/rules.d/70-wooting.rules"
+            if os.path.exists(udev_rules):
+                print(f"[Wooting] Removing udev rules from {udev_rules}...")
+                try:
+                    subprocess.run(["sudo", "rm", udev_rules], check=True)
+                    subprocess.run(["sudo", "udevadm", "control", "--reload-rules"], check=False)
+                    print("[Wooting] Udev rules removed successfully.")
+                except subprocess.CalledProcessError as e:
+                    print(f"[Wooting] Failed to remove udev rules: {e}")
         
         print(f"[Wooting] SDK and plugins removed successfully.")
         
@@ -344,5 +359,10 @@ def main_uninstall_plugins():
 
 
 if __name__ == "__main__":
-    run_post_install()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--uninstall":
+        uninstall_plugins()
+    else:
+        run_post_install()
+
 
