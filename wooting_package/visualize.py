@@ -21,19 +21,9 @@ import argparse, sys, os
 import h5py
 import numpy as np
 
-# Try to set an interactive backend before importing pyplot
 import matplotlib
-try:
-    # Try common GUI backends in order of preference
-    for backend in ['TkAgg', 'Qt5Agg', 'GTK3Agg', 'WXAgg']:
-        try:
-            matplotlib.use(backend)
-            break
-        except Exception:
-            continue
-except Exception:
-    pass  # Fall back to default backend
-
+# Use non-interactive backend by default to avoid tkinter dependency
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 FIXED_COLUMNS = ["position", "time_to_threshold", "time_abs"]
@@ -87,21 +77,17 @@ def visualize(ds: h5py.Dataset, head_n: int = 10, save_path: str = None) -> None
 
     plt.tight_layout()
     
-    # Save figure if path provided or if non-interactive backend
-    if save_path or matplotlib.get_backend() == 'agg':
-        if save_path is None:
-            save_path = "wooting_plot.png"
+    # Save figure if path provided
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"\n✓ Plot saved to: {os.path.abspath(save_path)}")
+    else:
+        # Default save location if no path provided
+        save_path = "wooting_plot.png"
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"\n✓ Plot saved to: {os.path.abspath(save_path)}")
     
-    # Try to show interactively
-    try:
-        plt.show()
-    except Exception as e:
-        if save_path is None:
-            save_path = "wooting_plot.png"
-            plt.savefig(save_path, dpi=150, bbox_inches='tight')
-            print(f"\n✓ Could not display plot interactively, saved to: {os.path.abspath(save_path)}")
+    plt.close(fig)
 
 def main():
     ap = argparse.ArgumentParser(description="Visualize /trials/<trial>/keys/<key>/values from an HDF5 file.")
