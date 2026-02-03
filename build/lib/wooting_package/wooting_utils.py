@@ -231,6 +231,9 @@ def _write_trial_file(
     backend: Optional[str] = None,
     trial_start_perf_ns: Optional[int] = None,
     stim_on_clock: Optional[str] = None,
+    threshold: Optional[float] = None,
+    threshold_time: Optional[float] = None,
+    threshold_key: Optional[int] = None,
 ) -> None:
 
     """Write one per-trial shard as hierarchical HDF5.
@@ -240,6 +243,9 @@ def _write_trial_file(
 
     Adds:
       /trials/<trial4>.attrs["backend"] = b"..."
+      /trials/<trial4>.attrs["threshold"] = float
+      /trials/<trial4>.attrs["threshold_time"] = float (time since trial_start_ns when threshold was crossed)
+      /trials/<trial4>.attrs["threshold_key"] = int (keycode that triggered threshold)
     """
     with h5py.File(path, "a") as f:
         g_trials = f.require_group("trials")
@@ -257,6 +263,15 @@ def _write_trial_file(
 
             if stim_on_clock is not None:
                 g_trial.attrs["stim_on_clock"] = str(stim_on_clock).encode("utf-8")
+
+            if threshold is not None:
+                g_trial.attrs["threshold"] = np.float64(float(threshold))
+
+            if threshold_time is not None:
+                g_trial.attrs["threshold_time"] = np.float64(float(threshold_time))
+
+            if threshold_key is not None:
+                g_trial.attrs["threshold_key"] = np.int64(int(threshold_key))
 
             g_keys = g_trial.require_group("keys")
             for k_str, serie in keys.items():
@@ -323,6 +338,15 @@ def _combine_all_trials(staging_dir: str, final_dir: str, base: str) -> None:
 
                         if "stim_on_clock" in g_in_trial.attrs and "stim_on_clock" not in g_out_trial.attrs:
                             g_out_trial.attrs["stim_on_clock"] = g_in_trial.attrs["stim_on_clock"]
+
+                        if "threshold" in g_in_trial.attrs and "threshold" not in g_out_trial.attrs:
+                            g_out_trial.attrs["threshold"] = g_in_trial.attrs["threshold"]
+
+                        if "threshold_time" in g_in_trial.attrs and "threshold_time" not in g_out_trial.attrs:
+                            g_out_trial.attrs["threshold_time"] = g_in_trial.attrs["threshold_time"]
+
+                        if "threshold_key" in g_in_trial.attrs and "threshold_key" not in g_out_trial.attrs:
+                            g_out_trial.attrs["threshold_key"] = g_in_trial.attrs["threshold_key"]
                         
                         g_out_keys = g_out_trial.require_group("keys")
                         g_in_keys = g_in_trial.get("keys")
@@ -573,6 +597,8 @@ class WOOTING_ACQUISITION:
         # cache of last trial's stimulus-onset reference (persisted to HDF5)
         self._last_trial_start_perf_ns: Optional[int] = None
         self._last_stim_on_clock: Optional[str] = None
+        self._last_threshold_time: Optional[float] = None
+        self._last_threshold_key: Optional[int] = None
 
         # --- buffers for read_full_buffer ---
         self._fullbuf_len: int = int(full_buffer_len)
@@ -662,6 +688,9 @@ class WOOTING_ACQUISITION:
             backend             = self.last_backend,
             trial_start_perf_ns = self._last_trial_start_perf_ns,
             stim_on_clock       = self._last_stim_on_clock,
+            threshold           = self.threshold,
+            threshold_time      = self._last_threshold_time,
+            threshold_key       = self._last_threshold_key,
         )
 
     def _combine_trials(self) -> None:
@@ -912,10 +941,13 @@ class WOOTING_ACQUISITION:
 
         self._last_trial_start_perf_ns = int(trial_start_perf_ns)
         self._last_stim_on_clock = str(trial_start_clock)
+        self._last_threshold_time = None
+        self._last_threshold_key = None
 
         buffer_pre_threshold = []
         triggered = False
         trigger_perf_ns = None
+        trigger_key = None
         bins: Dict[Tuple[int, int], List[Tuple[float, float, float]]] = {}
 
         next_t = time.perf_counter()
@@ -957,6 +989,7 @@ class WOOTING_ACQUISITION:
                 for s in snapshot:
                     if s["position"] >= self.threshold:
                         trigger_perf_ns = int(sample_perf_ns)
+                        trigger_key = int(s["key"])
                         triggered = True
                         callback_done = True
                         break
@@ -984,6 +1017,11 @@ class WOOTING_ACQUISITION:
                 bins.setdefault((self.trial, int(s["key"])), []).append(
                     (tth, tabs, float(s["position"]))
                 )
+
+        # Store threshold crossing info
+        if trigger_perf_ns is not None:
+            self._last_threshold_time = (int(trigger_perf_ns) - int(trial_start_perf_ns)) / 1e9
+            self._last_threshold_key = int(trigger_key) if trigger_key is not None else None
 
         hier = self._finalize_bins_to_hier(bins)
 
@@ -1075,10 +1113,13 @@ class WOOTING_ACQUISITION:
         -------
         hier : dict
             Hierarchical structure containing analog trajectories for each target key:
-                hier[trial_id][keycode]['time_to_threshold']  (seconds since trial_start)
+                hier[trial_id][keycode]['time_to_threshold']  (seconds since trial_start_ns)
                 hier[trial_id][keycode]['time_abs']           (seconds since epoch)
                 hier[trial_id][keycode]['position']           (float in [0, 1])
-            When duration_before_threshold=None, all samples before threshold are included.
+            
+            Note: 'time_to_threshold' is a misnomer - it's actually "time since trial_start_ns".
+            When duration_before_threshold=None, all samples before threshold are included,
+            so times will be positive both before and after threshold crossing.
 
         (hier, quit_pressed) : tuple
             Returned only if `quit_key` is provided.
@@ -1168,6 +1209,8 @@ class WOOTING_ACQUISITION:
         -------
         hier : dict
             Same hierarchical structure, but `position` arrays are integers in [0, 255].
+            
+            Note: 'time_to_threshold' is actually "time since trial_start_ns".
             When duration_before_threshold=None, all samples before threshold are included.
 
         (hier, quit_pressed) : tuple
