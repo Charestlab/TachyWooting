@@ -296,74 +296,75 @@ def _combine_all_trials(staging_dir: str, final_dir: str, base: str) -> None:
     """Combine `{base}_trial*.hdf5` into one hierarchical HDF5, then clean up."""
     pattern = os.path.join(staging_dir, f"{base}_trial*.hdf5")
     files = sorted(glob.glob(pattern))
-    if not files:
-        return
+    
+    if files:
+        os.makedirs(final_dir, exist_ok=True)
+        preferred_final_path = os.path.join(final_dir, f"{base}.hdf5")
+        final_path = _timestamped_if_exists(preferred_final_path)
 
-    os.makedirs(final_dir, exist_ok=True)
-    preferred_final_path = os.path.join(final_dir, f"{base}.hdf5")
-    final_path = _timestamped_if_exists(preferred_final_path)
-
-    with h5py.File(final_path, "a") as fout:
-        g_out_trials = fout.require_group("trials")
-        for shard in files:
-            with h5py.File(shard, "r") as fin:
-                if "trials" not in fin:
-                    continue
-
-                g_in_trials = fin["trials"]
-                for trial_name in g_in_trials:
-                    g_in_trial = g_in_trials[trial_name]
-                    g_out_trial = g_out_trials.require_group(trial_name)
-
-                    # copy backend attr if present (keep first one encountered)
-                    if "backend" in g_in_trial.attrs and "backend" not in g_out_trial.attrs:
-                        g_out_trial.attrs["backend"] = g_in_trial.attrs["backend"]
-
-                    if "trial_start_perf_ns" in g_in_trial.attrs and "trial_start_perf_ns" not in g_out_trial.attrs:
-                        g_out_trial.attrs["trial_start_perf_ns"] = g_in_trial.attrs["trial_start_perf_ns"]
-
-                    if "stim_on_clock" in g_in_trial.attrs and "stim_on_clock" not in g_out_trial.attrs:
-                        g_out_trial.attrs["stim_on_clock"] = g_in_trial.attrs["stim_on_clock"]
-                    
-                    g_out_keys = g_out_trial.require_group("keys")
-                    g_in_keys = g_in_trial.get("keys")
-                    if g_in_keys is None:
+        with h5py.File(final_path, "a") as fout:
+            g_out_trials = fout.require_group("trials")
+            for shard in files:
+                with h5py.File(shard, "r") as fin:
+                    if "trials" not in fin:
                         continue
 
-                    for key_name in g_in_keys:
-                        g_in_key = g_in_keys[key_name]
-                        if "values" not in g_in_key:
+                    g_in_trials = fin["trials"]
+                    for trial_name in g_in_trials:
+                        g_in_trial = g_in_trials[trial_name]
+                        g_out_trial = g_out_trials.require_group(trial_name)
+
+                        # copy backend attr if present (keep first one encountered)
+                        if "backend" in g_in_trial.attrs and "backend" not in g_out_trial.attrs:
+                            g_out_trial.attrs["backend"] = g_in_trial.attrs["backend"]
+
+                        if "trial_start_perf_ns" in g_in_trial.attrs and "trial_start_perf_ns" not in g_out_trial.attrs:
+                            g_out_trial.attrs["trial_start_perf_ns"] = g_in_trial.attrs["trial_start_perf_ns"]
+
+                        if "stim_on_clock" in g_in_trial.attrs and "stim_on_clock" not in g_out_trial.attrs:
+                            g_out_trial.attrs["stim_on_clock"] = g_in_trial.attrs["stim_on_clock"]
+                        
+                        g_out_keys = g_out_trial.require_group("keys")
+                        g_in_keys = g_in_trial.get("keys")
+                        if g_in_keys is None:
                             continue
 
-                        data_in = g_in_key["values"][()]  # (N, 3)
-                        g_out_key = g_out_keys.require_group(key_name)
+                        for key_name in g_in_keys:
+                            g_in_key = g_in_keys[key_name]
+                            if "values" not in g_in_key:
+                                continue
 
-                        if "values" in g_out_key:
-                            ds = g_out_key["values"]
-                            old = ds.shape[0]
-                            ds.resize((old + data_in.shape[0], 3))
-                            ds[old:] = data_in
-                        else:
-                            ds = g_out_key.create_dataset(
-                                "values",
-                                data=data_in,
-                                maxshape=(None, 3),
-                                chunks=True,
-                                compression="gzip",
-                                shuffle=True,
-                            )
-                            cols = g_in_key["values"].attrs.get("columns")
-                            if cols is not None:
-                                ds.attrs["columns"] = cols
+                            data_in = g_in_key["values"][()]  # (N, 3)
+                            g_out_key = g_out_keys.require_group(key_name)
 
-    # cleanup shards
-    for fp in files:
-        try:
-            os.remove(fp)
-        except OSError:
-            pass
+                            if "values" in g_out_key:
+                                ds = g_out_key["values"]
+                                old = ds.shape[0]
+                                ds.resize((old + data_in.shape[0], 3))
+                                ds[old:] = data_in
+                            else:
+                                ds = g_out_key.create_dataset(
+                                    "values",
+                                    data=data_in,
+                                    maxshape=(None, 3),
+                                    chunks=True,
+                                    compression="gzip",
+                                    shuffle=True,
+                                )
+                                cols = g_in_key["values"].attrs.get("columns")
+                                if cols is not None:
+                                    ds.attrs["columns"] = cols
+
+        # cleanup shards
+        for fp in files:
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+    
+    # cleanup staging directory (whether or not there were files)
     try:
-        if not os.listdir(staging_dir):
+        if os.path.isdir(staging_dir) and not os.listdir(staging_dir):
             os.rmdir(staging_dir)
     except OSError:
         pass
