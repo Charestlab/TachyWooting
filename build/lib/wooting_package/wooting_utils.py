@@ -995,7 +995,7 @@ class WOOTING_ACQUISITION:
         self,
         target_keys: Sequence[Union[str, int]],
         duration_after_threshold: float = 0.5,
-        duration_before_threshold: float = 0.2,
+        duration_before_threshold: Optional[float] = 0.2,
         sampling_interval: float = 1 / 8000,
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
@@ -1039,8 +1039,9 @@ class WOOTING_ACQUISITION:
         duration_after_threshold : float, default=0.5
             Duration (seconds) to keep sampling after the threshold is crossed.
 
-        duration_before_threshold : float, default=0.2
+        duration_before_threshold : float or None, default=0.2
             Maximum duration (seconds) of samples retained before the threshold crossing.
+            If None, all samples from the start are retained (no time limit before threshold).
 
         sampling_interval : float, default=1/8000
             Target sampling interval (seconds). Actual timing depends on OS scheduling.
@@ -1077,6 +1078,7 @@ class WOOTING_ACQUISITION:
                 hier[trial_id][keycode]['time_to_threshold']  (seconds since trial_start)
                 hier[trial_id][keycode]['time_abs']           (seconds since epoch)
                 hier[trial_id][keycode]['position']           (float in [0, 1])
+            When duration_before_threshold=None, all samples before threshold are included.
 
         (hier, quit_pressed) : tuple
             Returned only if `quit_key` is provided.
@@ -1130,7 +1132,7 @@ class WOOTING_ACQUISITION:
         self,
         target_keys: Sequence[Union[str, int]],
         duration_after_threshold: float = 0.5,
-        duration_before_threshold: float = 0.2,
+        duration_before_threshold: Optional[float] = 0.2,
         sampling_interval: float = 1 / 8000,
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
@@ -1166,6 +1168,7 @@ class WOOTING_ACQUISITION:
         -------
         hier : dict
             Same hierarchical structure, but `position` arrays are integers in [0, 255].
+            When duration_before_threshold=None, all samples before threshold are included.
 
         (hier, quit_pressed) : tuple
             Returned only if `quit_key` is provided.
