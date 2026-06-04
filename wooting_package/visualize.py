@@ -92,6 +92,7 @@ def main():
     ap.add_argument("--trial", type=int, help="Trial id (e.g., 1)")
     ap.add_argument("--key", type=int, help="Key id (e.g., 29)")
     ap.add_argument("--n", type=int, default=10, help="Rows to preview (default 10)")
+    ap.add_argument("--save", type=str, help="Save plot to file (e.g., plot.png)")
     args = ap.parse_args()
 
     try:
@@ -128,7 +129,7 @@ def main():
                 print(f"Key {key4} not found for trial {trial4}.", file=sys.stderr)
                 return
 
-        visualize(_load_values(f, trial4, key4), head_n=args.n)
+        visualize(_load_values(f, trial4, key4), head_n=args.n, save_path=args.save)
 
 if __name__ == "__main__":
     main()

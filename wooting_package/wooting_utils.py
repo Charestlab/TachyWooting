@@ -249,6 +249,9 @@ def _write_trial_file(
     backend: Optional[str] = None,
     trial_start_perf_ns: Optional[int] = None,
     stim_on_clock: Optional[str] = None,
+    threshold: Optional[float] = None,
+    threshold_time: Optional[float] = None,
+    threshold_key: Optional[int] = None,
 ) -> None:
 
     """Write one per-trial shard as hierarchical HDF5.
@@ -258,6 +261,9 @@ def _write_trial_file(
 
     Adds:
       /trials/<trial4>.attrs["backend"] = b"..."
+      /trials/<trial4>.attrs["threshold"] = float
+      /trials/<trial4>.attrs["threshold_time"] = float (time since trial_start_ns when threshold was crossed)
+      /trials/<trial4>.attrs["threshold_key"] = int (keycode that triggered threshold)
     """
     with h5py.File(path, "a") as f:
         g_trials = f.require_group("trials")
@@ -275,6 +281,15 @@ def _write_trial_file(
 
             if stim_on_clock is not None:
                 g_trial.attrs["stim_on_clock"] = str(stim_on_clock).encode("utf-8")
+
+            if threshold is not None:
+                g_trial.attrs["threshold"] = np.float64(float(threshold))
+
+            if threshold_time is not None:
+                g_trial.attrs["threshold_time"] = np.float64(float(threshold_time))
+
+            if threshold_key is not None:
+                g_trial.attrs["threshold_key"] = np.int64(int(threshold_key))
 
             g_keys = g_trial.require_group("keys")
             for k_str, serie in keys.items():
@@ -314,74 +329,84 @@ def _combine_all_trials(staging_dir: str, final_dir: str, base: str) -> None:
     """Combine `{base}_trial*.hdf5` into one hierarchical HDF5, then clean up."""
     pattern = os.path.join(staging_dir, f"{base}_trial*.hdf5")
     files = sorted(glob.glob(pattern))
-    if not files:
-        return
+    
+    if files:
+        os.makedirs(final_dir, exist_ok=True)
+        preferred_final_path = os.path.join(final_dir, f"{base}.hdf5")
+        final_path = _timestamped_if_exists(preferred_final_path)
 
-    os.makedirs(final_dir, exist_ok=True)
-    preferred_final_path = os.path.join(final_dir, f"{base}.hdf5")
-    final_path = _timestamped_if_exists(preferred_final_path)
-
-    with h5py.File(final_path, "a") as fout:
-        g_out_trials = fout.require_group("trials")
-        for shard in files:
-            with h5py.File(shard, "r") as fin:
-                if "trials" not in fin:
-                    continue
-
-                g_in_trials = fin["trials"]
-                for trial_name in g_in_trials:
-                    g_in_trial = g_in_trials[trial_name]
-                    g_out_trial = g_out_trials.require_group(trial_name)
-
-                    # copy backend attr if present (keep first one encountered)
-                    if "backend" in g_in_trial.attrs and "backend" not in g_out_trial.attrs:
-                        g_out_trial.attrs["backend"] = g_in_trial.attrs["backend"]
-
-                    if "trial_start_perf_ns" in g_in_trial.attrs and "trial_start_perf_ns" not in g_out_trial.attrs:
-                        g_out_trial.attrs["trial_start_perf_ns"] = g_in_trial.attrs["trial_start_perf_ns"]
-
-                    if "stim_on_clock" in g_in_trial.attrs and "stim_on_clock" not in g_out_trial.attrs:
-                        g_out_trial.attrs["stim_on_clock"] = g_in_trial.attrs["stim_on_clock"]
-                    
-                    g_out_keys = g_out_trial.require_group("keys")
-                    g_in_keys = g_in_trial.get("keys")
-                    if g_in_keys is None:
+        with h5py.File(final_path, "a") as fout:
+            g_out_trials = fout.require_group("trials")
+            for shard in files:
+                with h5py.File(shard, "r") as fin:
+                    if "trials" not in fin:
                         continue
 
-                    for key_name in g_in_keys:
-                        g_in_key = g_in_keys[key_name]
-                        if "values" not in g_in_key:
+                    g_in_trials = fin["trials"]
+                    for trial_name in g_in_trials:
+                        g_in_trial = g_in_trials[trial_name]
+                        g_out_trial = g_out_trials.require_group(trial_name)
+
+                        # copy backend attr if present (keep first one encountered)
+                        if "backend" in g_in_trial.attrs and "backend" not in g_out_trial.attrs:
+                            g_out_trial.attrs["backend"] = g_in_trial.attrs["backend"]
+
+                        if "trial_start_perf_ns" in g_in_trial.attrs and "trial_start_perf_ns" not in g_out_trial.attrs:
+                            g_out_trial.attrs["trial_start_perf_ns"] = g_in_trial.attrs["trial_start_perf_ns"]
+
+                        if "stim_on_clock" in g_in_trial.attrs and "stim_on_clock" not in g_out_trial.attrs:
+                            g_out_trial.attrs["stim_on_clock"] = g_in_trial.attrs["stim_on_clock"]
+
+                        if "threshold" in g_in_trial.attrs and "threshold" not in g_out_trial.attrs:
+                            g_out_trial.attrs["threshold"] = g_in_trial.attrs["threshold"]
+
+                        if "threshold_time" in g_in_trial.attrs and "threshold_time" not in g_out_trial.attrs:
+                            g_out_trial.attrs["threshold_time"] = g_in_trial.attrs["threshold_time"]
+
+                        if "threshold_key" in g_in_trial.attrs and "threshold_key" not in g_out_trial.attrs:
+                            g_out_trial.attrs["threshold_key"] = g_in_trial.attrs["threshold_key"]
+                        
+                        g_out_keys = g_out_trial.require_group("keys")
+                        g_in_keys = g_in_trial.get("keys")
+                        if g_in_keys is None:
                             continue
 
-                        data_in = g_in_key["values"][()]  # (N, 3)
-                        g_out_key = g_out_keys.require_group(key_name)
+                        for key_name in g_in_keys:
+                            g_in_key = g_in_keys[key_name]
+                            if "values" not in g_in_key:
+                                continue
 
-                        if "values" in g_out_key:
-                            ds = g_out_key["values"]
-                            old = ds.shape[0]
-                            ds.resize((old + data_in.shape[0], 3))
-                            ds[old:] = data_in
-                        else:
-                            ds = g_out_key.create_dataset(
-                                "values",
-                                data=data_in,
-                                maxshape=(None, 3),
-                                chunks=True,
-                                compression="gzip",
-                                shuffle=True,
-                            )
-                            cols = g_in_key["values"].attrs.get("columns")
-                            if cols is not None:
-                                ds.attrs["columns"] = cols
+                            data_in = g_in_key["values"][()]  # (N, 3)
+                            g_out_key = g_out_keys.require_group(key_name)
 
-    # cleanup shards
-    for fp in files:
-        try:
-            os.remove(fp)
-        except OSError:
-            pass
+                            if "values" in g_out_key:
+                                ds = g_out_key["values"]
+                                old = ds.shape[0]
+                                ds.resize((old + data_in.shape[0], 3))
+                                ds[old:] = data_in
+                            else:
+                                ds = g_out_key.create_dataset(
+                                    "values",
+                                    data=data_in,
+                                    maxshape=(None, 3),
+                                    chunks=True,
+                                    compression="gzip",
+                                    shuffle=True,
+                                )
+                                cols = g_in_key["values"].attrs.get("columns")
+                                if cols is not None:
+                                    ds.attrs["columns"] = cols
+
+        # cleanup shards
+        for fp in files:
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+    
+    # cleanup staging directory (whether or not there were files)
     try:
-        if not os.listdir(staging_dir):
+        if os.path.isdir(staging_dir) and not os.listdir(staging_dir):
             os.rmdir(staging_dir)
     except OSError:
         pass
@@ -686,6 +711,8 @@ class WOOTING_ACQUISITION:
         # cache of last trial's stimulus-onset reference (persisted to HDF5)
         self._last_trial_start_perf_ns: Optional[int] = None
         self._last_stim_on_clock: Optional[str] = None
+        self._last_threshold_time: Optional[float] = None
+        self._last_threshold_key: Optional[int] = None
 
         # --- buffers for read_full_buffer ---
         self._fullbuf_len: int = int(full_buffer_len)
@@ -808,6 +835,9 @@ class WOOTING_ACQUISITION:
             backend             = self.last_backend,
             trial_start_perf_ns = self._last_trial_start_perf_ns,
             stim_on_clock       = self._last_stim_on_clock,
+            threshold           = self.threshold,
+            threshold_time      = self._last_threshold_time,
+            threshold_key       = self._last_threshold_key,
         )
 
     def _combine_trials(self) -> None:
@@ -1199,6 +1229,8 @@ class WOOTING_ACQUISITION:
 
         self._last_trial_start_perf_ns = int(trial_start_perf_ns)
         self._last_stim_on_clock = str(trial_start_clock)
+        self._last_threshold_time = None
+        self._last_threshold_key = None
 
         buffer_pre_threshold = []
         triggered = False
@@ -1248,6 +1280,7 @@ class WOOTING_ACQUISITION:
                 for s in snapshot:
                     if s["position"] >= self.threshold:
                         trigger_perf_ns = int(sample_perf_ns)
+                        trigger_key = int(s["key"])
                         triggered = True
                         callback_done = True
                         break
@@ -1283,6 +1316,11 @@ class WOOTING_ACQUISITION:
                     (tth, tabs, float(s["position"]))
                 )
 
+        # Store threshold crossing info
+        if trigger_perf_ns is not None:
+            self._last_threshold_time = (int(trigger_perf_ns) - int(trial_start_perf_ns)) / 1e9
+            self._last_threshold_key = int(trigger_key) if trigger_key is not None else None
+
         hier = self._finalize_bins_to_hier(bins)
         self._pending_trial_had_removal = bool(trial_had_removal)
 
@@ -1294,7 +1332,7 @@ class WOOTING_ACQUISITION:
         self,
         target_keys: Sequence[Union[str, int]],
         duration_after_threshold: float = 0.5,
-        duration_before_threshold: float = 0.2,
+        duration_before_threshold: Optional[float] = 0.2,
         sampling_interval: float = 1 / 8000,
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
@@ -1338,8 +1376,9 @@ class WOOTING_ACQUISITION:
         duration_after_threshold : float, default=0.5
             Duration (seconds) to keep sampling after the threshold is crossed.
 
-        duration_before_threshold : float, default=0.2
+        duration_before_threshold : float or None, default=0.2
             Maximum duration (seconds) of samples retained before the threshold crossing.
+            If None, all samples from the start are retained (no time limit before threshold).
 
         sampling_interval : float, default=1/8000
             Target sampling interval (seconds). Actual timing depends on OS scheduling.
@@ -1373,9 +1412,13 @@ class WOOTING_ACQUISITION:
         -------
         hier : dict
             Hierarchical structure containing analog trajectories for each target key:
-                hier[trial_id][keycode]['time_to_threshold']  (seconds since trial_start)
+                hier[trial_id][keycode]['time_to_threshold']  (seconds since trial_start_ns)
                 hier[trial_id][keycode]['time_abs']           (seconds since epoch)
                 hier[trial_id][keycode]['position']           (float in [0, 1])
+            
+            Note: 'time_to_threshold' is a misnomer - it's actually "time since trial_start_ns".
+            When duration_before_threshold=None, all samples before threshold are included,
+            so times will be positive both before and after threshold crossing.
 
         (hier, quit_pressed) : tuple
             Returned only if `quit_key` is provided.
@@ -1433,7 +1476,7 @@ class WOOTING_ACQUISITION:
         self,
         target_keys: Sequence[Union[str, int]],
         duration_after_threshold: float = 0.5,
-        duration_before_threshold: float = 0.2,
+        duration_before_threshold: Optional[float] = 0.2,
         sampling_interval: float = 1 / 8000,
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
@@ -1469,6 +1512,9 @@ class WOOTING_ACQUISITION:
         -------
         hier : dict
             Same hierarchical structure, but `position` arrays are integers in [0, 255].
+            
+            Note: 'time_to_threshold' is actually "time since trial_start_ns".
+            When duration_before_threshold=None, all samples before threshold are included.
 
         (hier, quit_pressed) : tuple
             Returned only if `quit_key` is provided.
@@ -2305,3 +2351,70 @@ def delete_interface(file: Optional[str] = None):
             shutil.rmtree(egg_info_dir)
         except Exception:
             pass
+    
+    # Cleanup plugins if requested
+    if cleanup_plugins:
+        try:
+            # Set environment variable to skip auto-setup, then import uninstall function
+            os.environ['WOOTING_SKIP_SETUP'] = '1'
+            from wooting_package.post_install import uninstall_plugins
+            uninstall_plugins()
+        except Exception as e:
+            print(f"Warning: Failed to uninstall plugins: {e}")
+        finally:
+            # Clean up environment variable
+            os.environ.pop('WOOTING_SKIP_SETUP', None)
+
+
+def main_delete_interface():
+    """CLI entry point for delete_interface command."""
+    import argparse
+    import os
+    
+    # Parse args first to check if we need to skip setup
+    parser = argparse.ArgumentParser(
+        description='Clean up Wooting interface and optionally remove system plugins',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  wooting-delete-interface                 # Remove interface only
+  wooting-delete-interface --cleanup-plugins  # Remove interface + plugins
+        """
+    )
+    parser.add_argument(
+        '--cleanup-plugins',
+        action='store_true',
+        help='Also remove system-wide installed plugins (requires sudo/admin)'
+    )
+    parser.add_argument(
+        '--file',
+        type=str,
+        help='Additional file to delete'
+    )
+    
+    args = parser.parse_args()
+    
+    # If cleaning up plugins, skip auto-setup to avoid reinstalling
+    if args.cleanup_plugins:
+        os.environ['WOOTING_SKIP_SETUP'] = '1'
+    
+    try:
+        print("\n[Wooting] Cleaning up interface...")
+        if args.cleanup_plugins:
+            print("[Wooting] Plugins will also be removed...")
+        
+        delete_interface(file=args.file, cleanup_plugins=args.cleanup_plugins)
+        
+        print("[Wooting] Cleanup completed successfully.\n")
+    except KeyboardInterrupt:
+        print("\n[Wooting] Cleanup cancelled by user.")
+        import sys
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[Wooting] Cleanup failed: {e}")
+        import sys
+        sys.exit(1)
+    finally:
+        # Clean up environment variable
+        os.environ.pop('WOOTING_SKIP_SETUP', None)
+

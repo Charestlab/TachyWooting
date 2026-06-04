@@ -6,7 +6,13 @@ For deeper implementation details, see [documentation.md](documentation.md).
 Read the Docs/Sphinx sources live in [docs/](docs/) and use NumPy-style docstrings.
 Console scripts are documented in [docs/scripts.md](docs/scripts.md).
 
-## Features
+- **Analog Key Acquisition**: Read key positions (0.0–1.0) with microsecond-level timing
+- **Threshold-Based Triggering**: Automatically capture key press trajectories around actuation threshold
+- **HDF5 Logging**: Hierarchical per-trial logging with automatic shard merging
+- **Multi-Key Support**: Efficiently read multiple keys simultaneously using full-buffer API
+- **Cross-Platform**: Linux, macOS, and Windows support
+- **Automatic Setup**: Self-contained installation with system configuration
+- **CLI Tools**: Command-line utilities for plugin management and testing
 
 - Read analog key pressure as floats in the `0.0` to `1.0` range.
 - Convert analog pressure to integer values in the `0` to `255` range.
@@ -22,7 +28,28 @@ Console scripts are documented in [docs/scripts.md](docs/scripts.md).
 - A local compiler toolchain for the CFFI interface build.
 - Platform-specific permissions for USB/native library access.
 
-## Installation
+### Quick Start
+
+```bash
+pip install .
+```
+
+### What Happens During Installation
+
+The installation automatically handles:
+
+1. **CFFI Compilation** - Builds Python bindings for the Wooting SDK
+2. **Permission Setup** (Linux/macOS) - Configures udev rules/Gatekeeper
+3. **Plugin Installation** - Deploys SDK and plugins to system directories
+
+On first use (e.g., `wooting-demo`), the package automatically:
+- Sets up Linux permissions if needed
+- Compiles the CFFI interface
+- Installs SDK and plugins to system directories
+
+**Note**: Steps 2-3 require `sudo`/admin privileges.
+
+### Development Installation
 
 ```bash
 python -m pip install -e ".[cli,visualize]"
