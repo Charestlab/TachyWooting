@@ -10,7 +10,7 @@ Entry point:
 
 .. code-block:: toml
 
-   wooting-demo = "wooting_package.cli:main"
+   wooting-demo = "wooting_package.demos.cli:main"
 
 Runs a terminal demo for reading analog pressure from a selected key.
 
@@ -74,7 +74,7 @@ Entry point:
 
 .. code-block:: toml
 
-   wooting-visual-fixation-demo = "wooting_package.visual_fixation_demo:main"
+   wooting-visual-fixation-demo = "wooting_package.demos.visual_fixation_demo:main"
 
 Runs the TachyPy visual readiness demo with the interactive fixation cross.
 
@@ -117,7 +117,7 @@ Entry point:
 
 .. code-block:: toml
 
-   wooting-mini-bw-experiment = "wooting_package.mini_bw_experiment:main"
+   wooting-mini-bw-experiment = "wooting_package.demos.mini_bw_experiment:main"
 
 Runs a no-file TachyPy mini-experiment for testing response trials and
 finger-removal tracking.
