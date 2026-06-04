@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel", "cffi>=1.15.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,57 +7,89 @@ name = "wooting-analog"
 version = "0.1.0"
 description = "Python interface for Wooting analog keyboards"
 readme = "README.md"
-requires-python = ">=3.6"
-license = {file = "LICENSE"}
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Mathias Salvas-Hébert"},
     {name = "Guillaume Lalonde-Beaudoin"}
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+keywords = ["wooting", "analog-keyboard", "keyboard", "cffi", "hdf5"]
 
 dependencies = [
     "cffi>=1.15.0",
-    "setuptools>=61.0",  # Required by CFFI for Python >= 3.12
-    "pandas",
-    "pyarrow",
-    "numpy",
-    "matplotlib",
-    "h5py",  # Required for HDF5 logging functionality
-    "tqdm>=4.60.0",
-    "rich>=10.0.0",
+    "h5py>=3.8.0",
+    "numpy>=1.23.0",
+    "setuptools>=77.0",
 ]
 
 [project.optional-dependencies]
+cli = [
+    "rich>=10.0.0",
+    "tqdm>=4.60.0",
+]
+visualize = [
+    "matplotlib>=3.6.0",
+]
+tachypy = [
+    "tachypy @ git+https://github.com/Charestlab/tachypy.git",
+]
 dev = [
-    "pytest",
-    "black",
-    "flake8",
+    "black>=23.0.0",
+    "build>=1.0.0",
+    "pytest>=7.0.0",
+    "ruff>=0.4.0",
+    "twine>=5.0.0",
+    "wooting-analog[cli,tachypy,visualize]",
+]
+docs = [
+    "myst-parser>=2.0.0",
+    "roman>=4.0",
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=2.0.0",
+]
+all = [
+    "wooting-analog[cli,tachypy,visualize,docs]",
 ]
 
-[tool.setuptools]
-packages = ["wooting_package"]
+[tool.setuptools.packages.find]
+include = ["wooting_package*"]
+namespaces = true
 
 [tool.setuptools.package-data]
 wooting_package = [
-    "interface/*.so",
-    "interface/*.dylib",
-    "interface/*.dll",
-    "interface/*.pyd",
     "libraries/**/*",
     "permissions/**/*",
 ]
 
 [project.scripts]
 wooting-demo = "wooting_package.cli:main"
+wooting-build-interface = "wooting_package.post_install:run_post_install"
 wooting-delete-interface = "wooting_package.wooting_utils:delete_interface"
+wooting-visual-fixation-demo = "wooting_package.visual_fixation_demo:main"
+wooting-mini-bw-experiment = "wooting_package.mini_bw_experiment:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+ignore = ["E501"]

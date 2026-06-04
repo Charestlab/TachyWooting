@@ -28,7 +28,7 @@ try:
     from tqdm import tqdm
     from rich.console import Console
 except ImportError:
-    print("Error: Missing required dependency. Please install: pip install tqdm rich")
+    print('Error: Missing CLI dependencies. Install them with: pip install "wooting-analog[cli]"')
     sys.exit(1)
 
 from wooting_package import lib, convert_char_to_keycode
@@ -160,6 +160,9 @@ def demo_key(key: str = "C", update_interval: float = 0.01, threshold: Optional[
                    the bar color switches from red to green at this point.
     """
     console = Console()
+    if lib is None:
+        console.print("[red]Error:[/red] Native interface is not built. Run [bold]wooting-build-interface[/bold].")
+        sys.exit(1)
 
     # Setup signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, _signal_handler)

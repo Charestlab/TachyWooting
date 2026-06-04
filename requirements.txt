@@ -1,6 +1,2 @@
-pandas
-numpy
-matplotlib
-cffi
-setuptools
-hdf5
+.[cli,visualize]
+setuptools>=77.0

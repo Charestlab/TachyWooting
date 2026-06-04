@@ -1,0 +1,9 @@
+include LICENSE README.md documentation.md pyproject.toml
+recursive-include wooting_package/libraries *
+recursive-include wooting_package/permissions *
+recursive-include wooting_package/interface __init__.py
+recursive-include tests *.py
+exclude wooting_package/interface/wooting_interface*
+prune build
+prune dist
+global-exclude __pycache__ *.py[cod] .DS_Store

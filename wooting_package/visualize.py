@@ -17,14 +17,16 @@ The plot shows:
   - X (bottom): time_to_threshold
   - X (top): time_abs (affine transform of bottom axis)
 """
-import argparse, sys
+import argparse
+import sys
+
 import h5py
 import numpy as np
-import matplotlib.pyplot as plt
 
 FIXED_COLUMNS = ["position", "time_to_threshold", "time_abs"]
 
-def _pad4(x: int) -> str: return f"{int(x):04d}"
+def _pad4(x: int) -> str:
+    return f"{int(x):04d}"
 
 def _trials(f: h5py.File) -> list[str]:
     return sorted(f["trials"].keys()) if "trials" in f else []
@@ -35,12 +37,21 @@ def _keys_for(f: h5py.File, trial4: str) -> list[str]:
 
 def _load_values(f: h5py.File, trial4: str, key4: str) -> h5py.Dataset:
     path = f"/trials/{trial4}/keys/{key4}/values"
-    if path not in f: raise KeyError(f"Missing dataset at {path}")
+    if path not in f:
+        raise KeyError(f"Missing dataset at {path}")
     ds = f[path]
-    if not isinstance(ds, h5py.Dataset): raise TypeError(f"{path} is not a dataset")
+    if not isinstance(ds, h5py.Dataset):
+        raise TypeError(f"{path} is not a dataset")
     return ds
 
 def visualize(ds: h5py.Dataset, head_n: int = 10) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise RuntimeError(
+            'matplotlib is required for plotting. Install it with: pip install "wooting-analog[visualize]"'
+        ) from exc
+
     arr = np.asarray(ds[()])                      # (N, 3)
     cols_attr = ds.attrs.get("columns")
     cols = [c.decode() if isinstance(c, (bytes, np.bytes_)) else str(c)
@@ -71,7 +82,8 @@ def visualize(ds: h5py.Dataset, head_n: int = 10) -> None:
         pad = 0.02 * (xmax - xmin if xmax > xmin else 1.0)
         ax.set_xlim(xmin - pad, xmax + pad)
 
-    plt.tight_layout(); plt.show()
+    plt.tight_layout()
+    plt.show()
 
 def main():
     ap = argparse.ArgumentParser(description="Visualize /trials/<trial>/keys/<key>/values from an HDF5 file.")
@@ -85,13 +97,15 @@ def main():
     try:
         f = h5py.File(args.file, "r")
     except Exception as e:
-        print("Failed to open file:", e, file=sys.stderr); sys.exit(2)
+        print("Failed to open file:", e, file=sys.stderr)
+        sys.exit(2)
 
     with f:
         if args.list:
             ts = _trials(f)
             print("Trials:" if ts else "No /trials group found.")
-            for t in ts: print(" ", t)
+            for t in ts:
+                print(" ", t)
             return
 
         trial4 = _pad4(args.trial) if args.trial is not None else (
@@ -101,7 +115,8 @@ def main():
         if args.trial is None and trial4 not in f.get("trials", {}):
             # user typed number; reformat to 4 digits
             if "trials" in f and trial4 not in f["trials"]:
-                print(f"Trial {trial4} not found.", file=sys.stderr); return
+                print(f"Trial {trial4} not found.", file=sys.stderr)
+                return
 
         key4 = _pad4(args.key) if args.key is not None else (
             (lambda ks: _pad4(int(input(f"Pick key {', '.join(ks)} or number: ").strip())))
@@ -110,7 +125,8 @@ def main():
         if args.key is None and key4 not in f.get(f"/trials/{trial4}/keys", {}):
             g = f.get(f"/trials/{trial4}/keys")
             if not (isinstance(g, h5py.Group) and key4 in g):
-                print(f"Key {key4} not found for trial {trial4}.", file=sys.stderr); return
+                print(f"Key {key4} not found for trial {trial4}.", file=sys.stderr)
+                return
 
         visualize(_load_values(f, trial4, key4), head_n=args.n)
 

@@ -1,16 +1,81 @@
-# Python bytecode / cache
+# Bytecode and interpreter caches
 __pycache__/
 **/__pycache__/
+*.py[cod]
+*$py.class
 
-# Compiled extensions
-*.so
+# Test, lint, type-check and coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Sphinx / Read the Docs build outputs
+docs/_build/
+docs/generated/
+docs/api/generated/
+.doctrees/
+_build/
+
+# Native build byproducts
 *.o
+*.obj
+*.lo
+*.la
+*.a
+
+# Python extension modules generated locally
+*.so
 *.pyd
 
-# Setuptools / pip artifacts
+# Python package/build artifacts
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheelhouse/
+pip-wheel-metadata/
+*.egg
 *.egg-info/
 **/*.egg-info/
+*.whl
+MANIFEST
 
-# Ignore interface build artifacts but keep package marker
+# Editable installs / PEP 660 metadata
+__editable__.*.pth
+__editable___*
+*.pth
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Generated CFFI interface artifacts.
+# Keep the package marker, but ignore native files produced on each machine.
 wooting_package/interface/*
 !wooting_package/interface/__init__.py
+
+# Local acquisition/logging outputs
+*.h5
+*.hdf5
+*.parquet
+*.npy
+*.npz
+plot.png

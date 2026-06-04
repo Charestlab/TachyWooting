@@ -6,15 +6,13 @@ This script handles:
 - Building the CFFI interface if needed
 - macOS Gatekeeper quarantine removal and code signing
 
-This should be run once after installing the package, or it will be
-automatically called on first import if the interface is not yet built.
+Run this once after installing the package.
 """
 
-import time
-import os
 import glob
-import stat
+import os
 import platform
+import stat
 import subprocess
 from pathlib import Path
 
@@ -91,10 +89,7 @@ def apply_macos_gatekeeper() -> None:
         if dylib_dir.is_dir():
             # Remove quarantine on the folder (recursive)
             print(f"[Wooting] Removing macOS quarantine from: {dylib_dir}")
-            subprocess.run(
-                ["xattr", "-dr", "com.apple.quarantine", str(dylib_dir)],
-                check=False
-            )
+            subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(dylib_dir)], check=False)
         else:
             # Nothing to do if the folder is not present yet (e.g., sdist)
             return
@@ -111,13 +106,29 @@ def apply_macos_gatekeeper() -> None:
 
 
 def build_interface_if_needed() -> None:
-    """
-    Build the CFFI interface if it doesn't exist yet.
+    """Build the CFFI interface when no compiled module is present.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    RuntimeError
+        If ``setuptools`` is missing or if CFFI compilation fails.
     """
     if _compiled_interface_present():
         return  # already built
 
     try:
+        try:
+            import setuptools  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError(
+                "setuptools is required to build the CFFI interface on Python >= 3.12. "
+                'Install it with: python -m pip install "setuptools>=77.0"'
+            ) from exc
+
         from .wooting_interface_builder import build_interface
         print("[Wooting] Building CFFI interface...")
         build_interface()
@@ -128,9 +139,15 @@ def build_interface_if_needed() -> None:
 
 
 def run_post_install() -> None:
-    """
-    Main entry point for post-installation setup.
-    Runs all setup steps in the correct order.
+    """Run permissions, native interface build, and macOS Gatekeeper setup.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    This function backs the ``wooting-build-interface`` console script.
     """
     print("\n[Wooting] Running post-installation setup...\n")
     
@@ -148,4 +165,3 @@ def run_post_install() -> None:
 
 if __name__ == "__main__":
     run_post_install()
-

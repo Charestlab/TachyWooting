@@ -28,12 +28,22 @@ import os
 import glob
 import time
 import shutil
-from typing import Dict, List, Optional, Sequence, Tuple, Union, Literal, Set
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Literal, Set
 
 import h5py
 import numpy as np
 
-from wooting_package.interface import lib, ffi
+from wooting_package.interface import MISSING_INTERFACE_MESSAGE, lib, ffi
+from wooting_package.feedback import PressureFeedbackConfig, PressureFeedbackState
+
+
+_UNSET = object()
+
+
+def _require_native_interface() -> None:
+    """Fail only when native SDK access is actually needed."""
+    if lib is None or ffi is None:
+        raise RuntimeError(MISSING_INTERFACE_MESSAGE)
 
 
 # ============================================================
@@ -41,18 +51,26 @@ from wooting_package.interface import lib, ffi
 # ============================================================
 
 def convert_char_to_keycode(input_values) -> list | None:
-    """
-    Convert between characters and keycodes for Wooting keyboards (HID keycodes).
+    """Convert between key labels and HID keycodes.
 
-    Bidirectional:
-    - If input is str -> returns keycode int
-    - If input is int -> returns key name str
+    Parameters
+    ----------
+    input_values : str, int, or list
+        Key label, integer HID keycode, or list of labels/keycodes. String inputs
+        are converted to integer keycodes. Integer inputs are converted back to
+        key labels.
 
-    Args:
-        input_values (str|int|list): single or list
+    Returns
+    -------
+    list or None
+        Converted values. Returns ``None`` when no mapping exists.
 
-    Returns:
-        list of converted values (or None on error).
+    Examples
+    --------
+    >>> convert_char_to_keycode("A")
+    [4]
+    >>> convert_char_to_keycode([4])
+    ["A"]
     """
     key_mapping = [
         ['Esc', 41, 1, 1],
@@ -414,9 +432,20 @@ class WOOTING_ACQUISITION:
         Actuation threshold in analog units [0..1]. A trial is triggered when ANY target key
         reaches or exceeds this value during acquisition. You can change it after init.
 
+    min_pressure_start : float
+        Lower bound for light-press readiness checks and visual pressure feedback.
+
     max_pressure_start : float
         Upper bound for “light press” readiness checks (see wait_keys_light_press). Must be
-        below `threshold` by design (threshold >= max_pressure_start + 0.2 enforced in __init__).
+        below `threshold` by design.
+
+    finger_present_threshold : float
+        Minimum analog pressure used to consider that a monitored key still has finger contact
+        before the response threshold is reached.
+
+    count_post_threshold_removals : bool
+        If True, post-threshold drops below `finger_present_threshold` are also counted
+        in the removal statistics. Defaults to False.
 
     self.initialized : bool
         Is False by Default and becomes True once initialize_keyboard() has been called.
@@ -455,6 +484,27 @@ class WOOTING_ACQUISITION:
 
     last_backend : str
         Backend actually used on the most recent acquisition (useful for debugging / auditing).
+
+    total_trials : int
+        Number of completed acquisition trials tracked by this object.
+
+    removal_trials : int
+        Number of completed trials where at least one counted finger removal was detected.
+
+    removal_trial_indices : list[int]
+        Trial numbers where at least one counted finger removal was detected.
+
+    removal_trial_proportion : float
+        Proportion of completed trials containing at least one finger removal.
+
+    current_removal_streak : int
+        Number of consecutive most-recent trials containing finger removals.
+
+    max_removal_streak : int
+        Longest consecutive-removal streak observed since object creation.
+
+    last_trial_had_removal : bool
+        Whether the most recently completed trial contained at least one finger removal.
 
     Public methods (intended for users)
     -----------------------------------
@@ -514,6 +564,15 @@ class WOOTING_ACQUISITION:
         Returns the perf_counter() timestamp when the condition is satisfied.
         Raises TimeoutError if timeout_seconds is exceeded.
 
+    trial_contains_removal(trial_index: int) -> bool
+        Return whether the given trial index was flagged for a finger removal.
+
+    reached_consecutive_removal_limit(n: int) -> bool
+        Return True when the current consecutive-removal streak is at least `n`.
+
+    reached_total_removal_limit(n: int) -> bool
+        Return True when the cumulative number of flagged trials reaches `n`, `2n`, `3n`, etc.
+
     Notes
     -----
     - Always call initialize_keyboard() before calling acquisition methods.
@@ -525,16 +584,66 @@ class WOOTING_ACQUISITION:
         self,
         start_trial_number: int = 1,
         threshold: float = 0.8,
+        min_pressure_start: float = 0.01,
         max_pressure_start: float = 0.35,
+        light_press_hold_seconds: float = 0.30,
+        finger_present_threshold: float = 0.01,
+        count_post_threshold_removals: bool = False,
         backend: BackendMode = "auto",
         timing_mode: TimingMode = "hybrid",
         spin_margin_s: float = 0.0003,
         full_buffer_len: int = 256,
     ):
+        """
+        Create a Wooting acquisition helper.
+
+        Parameters
+        ----------
+        start_trial_number : int, default=1
+            First trial number to use. Set this when resuming an interrupted experiment.
+
+        threshold : float, default=0.8
+            Response threshold. Acquisition triggers once any monitored key reaches this value.
+
+        min_pressure_start : float, default=0.01
+            Minimum pressure required for light-press readiness checks.
+
+        max_pressure_start : float, default=0.35
+            Maximum pressure allowed for light-press readiness checks.
+
+        light_press_hold_seconds : float, default=0.30
+            Default hold duration used by visual light-press readiness checks when no
+            method-level `hold_seconds` is provided.
+
+        finger_present_threshold : float, default=0.01
+            Minimum pressure required to count a monitored key as still touched after the
+            acquisition loop has started. Values below this threshold are counted as
+            finger removals before the response threshold is reached.
+
+        count_post_threshold_removals : bool, default=False
+            Whether drops below `finger_present_threshold` after the response threshold
+            should also count in removal-trial statistics.
+
+        backend : {"auto", "read_analog", "read_full_buffer"}, default="auto"
+            SDK readout strategy.
+
+        timing_mode : {"sleep", "busy", "hybrid"}, default="hybrid"
+            Sampling cadence strategy.
+
+        spin_margin_s : float, default=0.0003
+            Busy-wait window used by hybrid timing mode.
+
+        full_buffer_len : int, default=256
+            Size of the C buffers used by the SDK full-buffer readout.
+        """
         if threshold <= 0.05 or threshold > 1:
             raise ValueError("threshold must be between 0.05 and 1")
-        if threshold < (max_pressure_start + 0.2):
-            raise ValueError("threshold must be at least 0.2 higher than max_pressure_start")
+        if not (0.0 <= min_pressure_start < max_pressure_start < threshold):
+            raise ValueError("Require 0 <= min_pressure_start < max_pressure_start < threshold")
+        if light_press_hold_seconds <= 0:
+            raise ValueError("light_press_hold_seconds must be > 0")
+        if not (0.0 <= finger_present_threshold < threshold):
+            raise ValueError("finger_present_threshold must be >= 0 and lower than threshold")
 
         if backend not in ("auto", "read_analog", "read_full_buffer"):
             raise ValueError("backend must be 'auto', 'read_analog', or 'read_full_buffer'")
@@ -546,9 +655,14 @@ class WOOTING_ACQUISITION:
 
         if full_buffer_len < 8:
             raise ValueError("full_buffer_len too small")
+        _require_native_interface()
 
         self.threshold = float(threshold)
+        self.min_pressure_start = float(min_pressure_start)
         self.max_pressure_start = float(max_pressure_start)
+        self.hold_seconds = float(light_press_hold_seconds)
+        self.finger_present_threshold = float(finger_present_threshold)
+        self.count_post_threshold_removals = bool(count_post_threshold_removals)
 
         self.initialized = False
         self.backend: BackendMode = backend
@@ -559,7 +673,7 @@ class WOOTING_ACQUISITION:
 
         if start_trial_number < 1:
             raise ValueError("start_trial_number must be >= 1 (1-based)")
-        self.trial = int(start_trial_number) # 1 if not specified
+        self.trial = int(start_trial_number)  # 1 if not specified
 
         self.logging_enabled: bool = False
         self.int_analog: Literal[1, 2] = 2  # 1=int (0..255), 2=analog (0..1)
@@ -581,6 +695,15 @@ class WOOTING_ACQUISITION:
         # cache for targets
         self._target_codes_cache: Optional[Tuple[int, ...]] = None
         self._target_set_cache: Optional[Set[int]] = None
+
+        self.total_trials: int = 0
+        self.removal_trials: int = 0
+        self.removal_trial_indices: List[int] = []
+        self._removal_trial_index_set: Set[int] = set()
+        self.current_removal_streak: int = 0
+        self.max_removal_streak: int = 0
+        self.last_trial_had_removal: bool = False
+        self._pending_trial_had_removal: bool = False
 
     # ---------------- logging ----------------
 
@@ -624,6 +747,30 @@ class WOOTING_ACQUISITION:
     """
 
     def setup_logging(self, name: str | None = None, path: str = None, int_analog: int = 2) -> None:
+        """Enable HDF5 logging for subsequent acquisition trials.
+
+        Parameters
+        ----------
+        name : str, optional
+            Base filename for the combined HDF5 output. The extension is ignored;
+            ``.hdf5`` is used for the final file.
+        path : str, optional
+            Directory where staging files and the final HDF5 file are written.
+            Defaults to the current working directory.
+        int_analog : {1, 2}, default=2
+            Logging mode. Use ``1`` for integer pressure values in ``[0, 255]``
+            and ``2`` for analog pressure values in ``[0, 1]``.
+
+        Raises
+        ------
+        ValueError
+            If the keyboard is not initialized or if ``int_analog`` is invalid.
+
+        Notes
+        -----
+        Trial shards are written to a staging directory and merged into the final
+        file when :meth:`uninitialize_keyboard` is called.
+        """
         if not self.initialized :
             raise ValueError(
                 "Keyboard must be initialized through \"initialize_keyboard()\"."
@@ -671,6 +818,25 @@ class WOOTING_ACQUISITION:
     # ---------------- init/uninit ---- ------------
 
     def initialize_keyboard(self, verbose: bool = False) -> bool:
+        """Initialize the Wooting Analog SDK and detect a connected device.
+
+        Parameters
+        ----------
+        verbose : bool, default=False
+            If ``True``, print basic information about the detected device.
+
+        Returns
+        -------
+        bool
+            ``True`` when initialization succeeds.
+
+        Raises
+        ------
+        RuntimeError
+            If the native CFFI interface is missing, no Wooting device is found,
+            or the SDK reports that initialization failed.
+        """
+        _require_native_interface()
         device_count = int(lib.wooting_analog_initialise())
         if device_count <= 0:
             raise RuntimeError("No Wooting devices found or failed to initialize.")
@@ -700,6 +866,13 @@ class WOOTING_ACQUISITION:
         return True
 
     def uninitialize_keyboard(self) -> None:
+        """Uninitialize the Wooting SDK and merge any pending log shards.
+
+        Notes
+        -----
+        Always call this at the end of an experiment when logging is enabled so
+        per-trial staging files are merged into the final HDF5 file.
+        """
         try:
             lib.wooting_analog_uninitialise()
         finally:
@@ -786,10 +959,126 @@ class WOOTING_ACQUISITION:
             return self._read_positions_full_buffer(target_codes)
         return self._read_positions_read_analog(target_codes)
 
+    @property
+    def removal_trial_proportion(self) -> float:
+        """float: Proportion of completed trials containing finger removals."""
+        if self.total_trials == 0:
+            return 0.0
+        return self.removal_trials / self.total_trials
+
+    def trial_contains_removal(self, trial_index: int) -> bool:
+        """Return whether a completed trial had a finger removal.
+
+        Parameters
+        ----------
+        trial_index : int
+            One-based trial index to query.
+
+        Returns
+        -------
+        bool
+            ``True`` if the trial was flagged for at least one counted finger removal.
+            By default only pre-threshold removals are counted; post-threshold removals
+            are included when `count_post_threshold_removals=True`.
+        """
+        return int(trial_index) in self._removal_trial_index_set
+
+    def reached_consecutive_removal_limit(self, n: int) -> bool:
+        """Return whether the current removal streak reached a threshold.
+
+        Parameters
+        ----------
+        n : int
+            Consecutive-removal threshold.
+
+        Returns
+        -------
+        bool
+            ``True`` if the current streak is at least ``n``.
+        """
+        if n <= 0:
+            raise ValueError("n must be positive")
+        return self.current_removal_streak >= int(n)
+
+    def reached_total_removal_limit(self, n: int) -> bool:
+        """Return whether the cumulative removal count reached an interval.
+
+        Parameters
+        ----------
+        n : int
+            Cumulative interval. For example, ``n=5`` returns ``True`` at
+            5, 10, 15, ... flagged trials.
+
+        Returns
+        -------
+        bool
+            ``True`` when the number of removal trials is a positive multiple of
+            ``n``.
+        """
+        if n <= 0:
+            raise ValueError("n must be positive")
+        return self.removal_trials > 0 and self.removal_trials % int(n) == 0
+
+    def get_response_key(
+        self,
+        hier: Dict[str, Dict[str, Dict[str, Any]]],
+        target_keys: Sequence[Union[str, int]],
+        trial_index: Optional[int] = None,
+    ) -> int:
+        """Return the keycode of the target key that was pressed in the last acquired trial.
+
+        Pass the ``hier`` dict returned by :meth:`acquire_analog_values` or
+        :meth:`acquire_integer_values`. The key with the highest peak position
+        in that trial is returned — in a standard yes/no response where only one
+        key is pressed, this uniquely identifies the response.
+
+        Parameters
+        ----------
+        hier : dict
+            Acquisition output from ``acquire_analog_values`` or
+            ``acquire_integer_values``.
+        target_keys : sequence of str or int
+            The same keys that were passed to the acquire call.
+        trial_index : int, optional
+            Trial index to look up in ``hier``. Defaults to ``self.trial - 1``,
+            which is correct when called immediately after acquisition.
+
+        Returns
+        -------
+        int
+            Keycode of the key with the highest peak position.
+        """
+        t = str(self.trial - 1 if trial_index is None else trial_index)
+        target_codes = self._to_keycodes(target_keys)
+        return max(
+            target_codes,
+            key=lambda c: np.asarray(
+                hier.get(t, {}).get(str(c), {}).get("position", [0.0])
+            ).max(),
+        )
+
+    def _record_trial_removal_status(self, trial_index: int, had_removal: bool) -> None:
+        self.total_trials += 1
+        self.last_trial_had_removal = bool(had_removal)
+
+        if had_removal:
+            self.removal_trials += 1
+            self.removal_trial_indices.append(int(trial_index))
+            self._removal_trial_index_set.add(int(trial_index))
+            self.current_removal_streak += 1
+            self.max_removal_streak = max(self.max_removal_streak, self.current_removal_streak)
+            return
+
+        self.current_removal_streak = 0
+
+    @staticmethod
+    def _snapshot_has_finger_removal(snapshot, finger_present_threshold: float) -> bool:
+        """Return True when any monitored sample is below the contact threshold."""
+        return any(float(sample["position"]) < finger_present_threshold for sample in snapshot)
+
     def _wait_until_next_tick(self, next_t: float) -> None:
         if self.timing_mode == "busy":
             while time.perf_counter() < next_t:
-                time.sleep(0.001)
                 pass
             return
 
@@ -808,7 +1097,6 @@ class WOOTING_ACQUISITION:
                 time.sleep(remaining - self.spin_margin_s)
             else:
                 while time.perf_counter() < next_t:
-                    time.sleep(0.001)
                     pass
                 break
 
@@ -915,6 +1203,7 @@ class WOOTING_ACQUISITION:
         buffer_pre_threshold = []
         triggered = False
         trigger_perf_ns = None
+        trial_had_removal = False
         bins: Dict[Tuple[int, int], List[Tuple[float, float, float]]] = {}
 
         next_t = time.perf_counter()
@@ -953,6 +1242,9 @@ class WOOTING_ACQUISITION:
             ]
 
             if not triggered:
+                if self._snapshot_has_finger_removal(snapshot, self.finger_present_threshold):
+                    trial_had_removal = True
+
                 for s in snapshot:
                     if s["position"] >= self.threshold:
                         trigger_perf_ns = int(sample_perf_ns)
@@ -962,12 +1254,19 @@ class WOOTING_ACQUISITION:
                 buffer_pre_threshold.extend(snapshot)
 
             if triggered:
+                if getattr(self, "count_post_threshold_removals", False) and self._snapshot_has_finger_removal(
+                    snapshot,
+                    self.finger_present_threshold,
+                ):
+                    trial_had_removal = True
+
                 for s in snapshot:
+                    key = int(s["key"])
+                    position = float(s["position"])
+
                     tth = (int(s["perf_ns"]) - int(trial_start_perf_ns)) / 1e9
                     tabs = int(s["epoch_ns"]) / 1e9
-                    bins.setdefault((self.trial, int(s["key"])), []).append(
-                        (tth, tabs, float(s["position"]))
-                    )
+                    bins.setdefault((self.trial, key), []).append((tth, tabs, position))
 
                 if (sample_perf_ns - trigger_perf_ns) / 1e9 >= duration_after_threshold:
                     break
@@ -985,6 +1284,7 @@ class WOOTING_ACQUISITION:
                 )
 
         hier = self._finalize_bins_to_hier(bins)
+        self._pending_trial_had_removal = bool(trial_had_removal)
 
         if quit_code is not None:
             return hier, bool(quit_pressed)
@@ -1119,6 +1419,10 @@ class WOOTING_ACQUISITION:
         if self.logging_enabled and self.int_analog == 2:
             self._write_hdf5_trial_shard(hier)
 
+        self._record_trial_removal_status(
+            trial_index=self.trial,
+            had_removal=getattr(self, "_pending_trial_had_removal", False),
+        )
         self.trial += 1
 
         # Keep return shape consistent with quit_key usage
@@ -1213,6 +1517,10 @@ class WOOTING_ACQUISITION:
         if self.logging_enabled and self.int_analog == 1:
             self._write_hdf5_trial_shard(hier)
 
+        self._record_trial_removal_status(
+            trial_index=self.trial,
+            had_removal=getattr(self, "_pending_trial_had_removal", False),
+        )
         self.trial += 1
 
         return (hier, quit_pressed) if quit_key is not None else hier
@@ -1226,21 +1534,45 @@ class WOOTING_ACQUISITION:
         verbose: bool = False,
     ) -> bool:
         """
-        Wait until ALL target keys are lightly pressed at the same time and remain
-        in that state for a fixed duration.
+        Wait for keys to remain in the light-press range.
 
-        quit_key (str | int):
-            A key that, if pressed, stops the loop and returns False.
+        Parameters
+        ----------
+        target_keys : sequence of str or int
+            Keys that must all stay between ``min_pressure_start`` and
+            ``max_pressure_start``.
+        quit_key : str or int
+            Key that aborts the wait when pressed. The method returns ``False``
+            if this key reaches the lower light-press threshold.
+        hold_seconds : float, default=0.30
+            Required continuous duration in the accepted range.
+        timeout_seconds : float, optional
+            Maximum time to wait before raising ``TimeoutError``.
+        verbose : bool, default=False
+            Print state transitions and reset reasons.
+
+        Returns
+        -------
+        bool
+            ``True`` when all keys are held in range for ``hold_seconds``.
+            ``False`` when ``quit_key`` is pressed.
+
+        Raises
+        ------
+        ValueError
+            If the keyboard is not initialized or parameters are invalid.
+        TimeoutError
+            If ``timeout_seconds`` is reached.
         """
 
         if not getattr(self, "initialized", False):
             raise ValueError('Keyboard must be initialized through "initialize_keyboard()".')
 
-        LOW = 0.01
+        LOW = self.min_pressure_start
         HIGH = float(self.max_pressure_start)
 
         if not (0.0 < LOW < HIGH <= 1.0):
-            raise ValueError("Invalid pressure range: require 0.01 < max_pressure_start <= 1.0")
+            raise ValueError("Invalid pressure range: require 0 < min_pressure_start < max_pressure_start <= 1")
         if hold_seconds <= 0:
             raise ValueError("hold_seconds must be > 0")
         if timeout_seconds is not None and timeout_seconds <= 0:
@@ -1380,6 +1712,357 @@ class WOOTING_ACQUISITION:
 
             self._wait_until_next_tick(next_t)
 
+    def wait_keys_light_press_visual(
+        self,
+        screen,
+        target_keys,
+        hold_seconds: float | None = None,
+        timeout_seconds: float | None = None,
+        widget=None,
+        fixation_cross=None,
+        center=None,
+        half_width: float | object = _UNSET,
+        half_height: float | object = _UNSET,
+        thickness: float | object = _UNSET,
+        background_color=(128, 128, 128),
+        initial_color=_UNSET,
+        target_color=_UNSET,
+        vertical_color=None,
+        show_pressure_text: bool | object = _UNSET,
+        left_pressure_label: str | None = None,
+        right_pressure_label: str | None = None,
+        response_handler=None,
+        exit_keys=("escape", "esc", "enter", "return", "space", "q"),
+        verbose: bool = False,
+    ) -> bool:
+        """
+        Wait for two keys to stay in the light-press range while showing visual feedback.
+
+        This is the high-level visual readiness API. In the common case, users
+        only provide a TachyPy screen, a TachyPy response handler, and two target
+        keys. The method creates the default interactive fixation-cross widget,
+        reads Wooting pressure values, updates the widget each frame, flips the
+        screen, and returns when the participant holds both keys in range.
+
+        Parameters
+        ----------
+        screen : object
+            TachyPy `Screen`-like object. It must expose `flip()`. If it exposes
+            `fill(color)`, the screen is filled with `background_color` each
+            frame before drawing.
+
+        target_keys : sequence of str or int
+            Exactly two target keys. The first key controls the left side of the
+            visual feedback; the second key controls the right side. Labels for
+            pressure text are inferred from these values unless
+            `left_pressure_label` / `right_pressure_label` are provided.
+
+        hold_seconds : float, optional
+            Required continuous hold duration, in seconds. If omitted, the value
+            stored on the acquisition object (`self.hold_seconds`) is used.
+
+        timeout_seconds : float, optional
+            Maximum time to wait. If provided and exceeded, `TimeoutError` is
+            raised.
+
+        widget : PressureFeedbackWidget, optional
+            Advanced override. If provided, this widget is used directly and no
+            TachyPy widget is created. When `widget` is provided, do not also
+            pass auto-widget configuration arguments such as `fixation_cross`,
+            `half_width`, `target_color`, or `show_pressure_text`; doing so
+            raises `ValueError`.
+
+        fixation_cross : object, optional
+            Existing TachyPy `FixationCross`-like object used to configure the
+            automatically-created widget. Its `center`, `half_width`,
+            `half_height`, `thickness`, and `color` are reused when present.
+            `color` becomes the widget `target_color`.
+
+        center : tuple[float, float], optional
+            Manual center for the automatically-created widget. Ignored when
+            `fixation_cross` provides a center. Invalid with `widget`.
+
+        half_width, half_height : float, optional
+            Manual horizontal and vertical half-size for the automatically-created
+            widget. Invalid with `widget`.
+
+        thickness : float, optional
+            Manual line thickness for the automatically-created widget. Invalid
+            with `widget`.
+
+        background_color : tuple[int, int, int], default=(128, 128, 128)
+            RGB color used to clear the screen each frame and to validate that
+            the widget's initial color is visible.
+
+        initial_color : tuple[int, int, int], optional
+            Starting RGB color for the interactive horizontal line while hold
+            progress is zero. Defaults to `(100, 100, 100)` when the widget is
+            created automatically. Invalid with `widget`.
+
+        target_color : tuple[int, int, int], optional
+            Final RGB color reached when hold progress reaches one. Defaults to
+            `(0, 0, 0)` unless copied from `fixation_cross.color`. Invalid with
+            `widget`.
+
+        vertical_color : tuple[int, int, int], optional
+            RGB color for the vertical fixation line. If omitted, the vertical
+            line uses the same interpolated color as the horizontal line.
+            Invalid with `widget`.
+
+        show_pressure_text : bool, optional
+            Whether the automatically-created widget shows pressure text for keys
+            outside the acceptable pressure interval. Defaults to `True` for this
+            high-level method. Invalid with `widget`.
+
+        left_pressure_label, right_pressure_label : str, optional
+            Text labels for left and right pressure readouts. If omitted, labels
+            are inferred from `target_keys`. Invalid with `widget`.
+
+        response_handler : object, optional
+            TachyPy `ResponseHandler`-like object. If provided, the method calls
+            `get_events()`, checks `should_quit()`, and checks key presses
+            against `exit_keys` on each frame. A quit request returns `False`.
+
+        exit_keys : sequence of str, default=("escape", "esc", "enter", "return", "space", "q")
+            Key names that stop the visual wait early when `response_handler` is
+            provided.
+
+        verbose : bool, default=False
+            Print a message when readiness is reached.
+
+        Returns
+        -------
+        bool
+            `True` when both keys were held in the acceptable pressure interval
+            for `hold_seconds`. `False` when the user exits through
+            `response_handler`.
+
+        Raises
+        ------
+        ValueError
+            If the keyboard is not initialized, if pressure/timing arguments are
+            invalid, if `target_keys` does not contain exactly two keys, or if a
+            custom `widget` is combined with auto-widget configuration arguments.
+
+        TimeoutError
+            If `timeout_seconds` is provided and reached before readiness.
+
+        RuntimeError
+            If TachyPy support is required to create the default widget but is not
+            installed.
+
+        Priority
+        --------
+        Widget creation follows this precedence:
+
+        1. If `widget` is provided, it is used directly. All auto-widget
+           configuration arguments are invalid in this case because they would
+           not be applied.
+        2. If `widget` is not provided and `fixation_cross` is provided, the
+           automatic widget copies `center`, `half_width`, `half_height`,
+           `thickness`, and `target_color` from the fixation cross. In this case,
+           `fixation_cross.center` takes priority over `center`,
+           `fixation_cross.half_width` over `half_width`,
+           `fixation_cross.half_height` over `half_height`,
+           `fixation_cross.thickness` over `thickness`, and
+           `fixation_cross.color` over `target_color`.
+        3. If neither `widget` nor `fixation_cross` provides a value, explicit
+           method arguments are used (`center`, `half_width`, `half_height`,
+           `thickness`, `target_color`, etc.).
+        4. If no explicit method argument is provided, default widget values are
+           used. If `center` remains unset, the widget computes the center from
+           `screen.width` / `screen.height`.
+        5. Pressure text labels use `left_pressure_label` /
+           `right_pressure_label` when provided. Otherwise they are inferred from
+           `target_keys`.
+
+        Examples
+        --------
+        Minimal usage:
+
+        >>> acq.wait_keys_light_press_visual(
+        ...     screen=screen,
+        ...     response_handler=response_handler,
+        ...     target_keys=["c", "z"],
+        ... )
+
+        Reuse an existing TachyPy fixation cross:
+
+        >>> acq.wait_keys_light_press_visual(
+        ...     screen=screen,
+        ...     response_handler=response_handler,
+        ...     target_keys=["c", "z"],
+        ...     fixation_cross=fixation,
+        ... )
+
+        Complex usage with explicit visual settings:
+
+        >>> acq.wait_keys_light_press_visual(
+        ...     screen=screen,
+        ...     response_handler=response_handler,
+        ...     target_keys=["c", "z"],
+        ...     hold_seconds=0.30,
+        ...     timeout_seconds=10.0,
+        ...     center=(screen.width // 2, screen.height // 2),
+        ...     half_width=80,
+        ...     half_height=80,
+        ...     thickness=10,
+        ...     background_color=(128, 128, 128),
+        ...     initial_color=(80, 80, 80),
+        ...     target_color=(0, 0, 0),
+        ...     vertical_color=(0, 0, 0),
+        ...     show_pressure_text=True,
+        ...     exit_keys=("escape", "enter", "space", "q"),
+        ... )
+
+        Advanced usage with a custom widget:
+
+        >>> widget = TachyPyInteractiveFixationCross(
+        ...     screen=screen,
+        ...     acquisition=acq,
+        ...     show_pressure_text=False,
+        ... )
+        >>> acq.wait_keys_light_press_visual(
+        ...     screen=screen,
+        ...     response_handler=response_handler,
+        ...     target_keys=["c", "z"],
+        ...     widget=widget,
+        ... )
+        """
+        if not getattr(self, "initialized", False):
+            raise ValueError('Keyboard must be initialized through "initialize_keyboard()".')
+        hold_seconds = self.hold_seconds if hold_seconds is None else float(hold_seconds)
+        if hold_seconds <= 0:
+            raise ValueError("hold_seconds must be > 0")
+        if timeout_seconds is not None and timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be > 0 if provided")
+
+        target_keys = list(target_keys)
+        target_codes = self._to_keycodes(target_keys)
+        if len(target_codes) != 2:
+            raise ValueError("wait_keys_light_press_visual requires exactly two target keys")
+        explicit_left_pressure_label = left_pressure_label is not None
+        explicit_right_pressure_label = right_pressure_label is not None
+        left_pressure_label = left_pressure_label or str(target_keys[0]).upper()
+        right_pressure_label = right_pressure_label or str(target_keys[1]).upper()
+
+        if widget is not None:
+            conflicting_widget_args = []
+            for name, value in (
+                ("fixation_cross", fixation_cross),
+                ("center", center),
+                ("half_width", half_width),
+                ("half_height", half_height),
+                ("thickness", thickness),
+                ("initial_color", initial_color),
+                ("target_color", target_color),
+                ("vertical_color", vertical_color),
+                ("show_pressure_text", show_pressure_text),
+            ):
+                if value is not None and value is not _UNSET:
+                    conflicting_widget_args.append(name)
+            if explicit_left_pressure_label:
+                conflicting_widget_args.append("left_pressure_label")
+            if explicit_right_pressure_label:
+                conflicting_widget_args.append("right_pressure_label")
+            if conflicting_widget_args:
+                names = ", ".join(conflicting_widget_args)
+                raise ValueError(
+                    "Do not pass auto-widget configuration arguments when `widget` is provided: "
+                    f"{names}. Configure the widget directly instead."
+                )
+
+        exit_key_set = {str(key).lower() for key in exit_keys}
+        if response_handler is not None and hasattr(response_handler, "keys_to_listen"):
+            response_handler.keys_to_listen = sorted(exit_key_set)
+
+        if widget is None:
+            try:
+                from wooting_package.feedback.tachypy_widget import TachyPyInteractiveFixationCross
+            except ImportError as exc:
+                raise RuntimeError('Install TachyPy support with: pip install ".[tachypy]"') from exc
+            widget = TachyPyInteractiveFixationCross(
+                screen=screen,
+                fixation_cross=fixation_cross,
+                center=center,
+                half_width=8.0 if half_width is _UNSET else half_width,
+                half_height=8.0 if half_height is _UNSET else half_height,
+                thickness=1.0 if thickness is _UNSET else thickness,
+                background_color=background_color,
+                initial_color=(100, 100, 100) if initial_color is _UNSET else initial_color,
+                target_color=(0, 0, 0) if target_color is _UNSET else target_color,
+                vertical_color=vertical_color,
+                acquisition=self,
+                show_pressure_text=True if show_pressure_text is _UNSET else show_pressure_text,
+                left_pressure_label=left_pressure_label,
+                right_pressure_label=right_pressure_label,
+            )
+
+        state = PressureFeedbackState(
+            PressureFeedbackConfig(
+                min_pressure_start=self.min_pressure_start,
+                max_pressure_start=self.max_pressure_start,
+                threshold=self.threshold,
+                hold_seconds=hold_seconds,
+            )
+        )
+
+        interval = 1.0 / 1000.0
+        next_t = time.perf_counter()
+        deadline = None if timeout_seconds is None else next_t + timeout_seconds
+
+        while True:
+            now = time.perf_counter()
+            if deadline is not None and now >= deadline:
+                raise TimeoutError("wait_keys_light_press_visual: timeout exceeded")
+            if self._visual_exit_requested(response_handler, exit_key_set):
+                return False
+
+            frame_background_color = background_color() if callable(background_color) else background_color
+            if hasattr(screen, "fill"):
+                screen.fill(frame_background_color)
+
+            pos_map = self._read_positions_for_targets(target_codes)
+            state.update(
+                left_pressure=float(pos_map.get(int(target_codes[0]), 0.0)),
+                right_pressure=float(pos_map.get(int(target_codes[1]), 0.0)),
+                now=now,
+            )
+
+            widget.update(state)
+            widget.draw()
+
+            if not hasattr(screen, "flip"):
+                raise AttributeError("screen must expose flip()")
+            screen.flip()
+
+            if state.is_ready:
+                if verbose:
+                    print("[wait_keys_light_press_visual] condition satisfied.")
+                return True
+
+            next_t += interval
+            now2 = time.perf_counter()
+            if next_t < (now2 - 0.10):
+                next_t = now2 + interval
+
+            self._wait_until_next_tick(next_t)
+
+    @staticmethod
+    def _visual_exit_requested(response_handler, exit_keys: set[str]) -> bool:
+        if response_handler is None:
+            return False
+        if hasattr(response_handler, "get_events"):
+            response_handler.get_events()
+        if hasattr(response_handler, "should_quit") and response_handler.should_quit():
+            return True
+        if not hasattr(response_handler, "get_key_presses"):
+            return False
+        for event in response_handler.get_key_presses():
+            if event.get("type") == "keydown" and str(event.get("key", "")).lower() in exit_keys:
+                return True
+        return False
+
 
     def wait_keys_released(
         self,
@@ -1387,29 +2070,52 @@ class WOOTING_ACQUISITION:
         hold_seconds: float = 0.30,
         timeout_seconds: float | None = None,
         release_max: float = 0.01,
+        response_handler=None,
+        exit_keys=("escape", "esc", "enter", "return", "space", "q"),
+        on_tick=None,
         verbose: bool = False,
-    ) -> float:
+    ) -> float | None:
         """
-        Wait until ALL target keys are released at the same time and remain
-        in that state for a fixed duration.
+        Wait for all target keys to be released.
 
-        Released definition:
-            - key force <= release_max  (default: 0.01 to tolerate small sensor noise)
+        Parameters
+        ----------
+        target_keys : sequence of str or int
+            Keys that must all remain at or below ``release_max``.
+        hold_seconds : float, default=0.30
+            Required continuous release duration.
+        timeout_seconds : float, optional
+            Maximum time to wait before raising ``TimeoutError``.
+        release_max : float, default=0.01
+            Maximum pressure considered released. This tolerance helps absorb
+            small sensor noise.
+        response_handler : object, optional
+            TachyPy ``ResponseHandler``-like object used to detect exit keys.
+        exit_keys : sequence of str, default=("escape", "esc", "enter", "return", "space", "q")
+            Keys that stop the wait early when ``response_handler`` is provided.
+        on_tick : callable, optional
+            Function called once per polling iteration. Useful for drawing a
+            visual display while waiting for release.
+        verbose : bool, default=False
+            Print state transitions and reset reasons.
 
-        Sampling rate is fixed at 1000 Hz.
-        Timing precision follows the instance timing_mode (sleep / busy / hybrid).
+        Returns
+        -------
+        float or None
+            ``time.perf_counter()`` timestamp when release is satisfied. Returns
+            ``None`` when an exit key is detected through ``response_handler``.
 
-        Typical use:
-            acqui.wait_keys_released(['z', 'c'], hold_seconds=0.25)
-            # then start the trial / flip screen / etc.
+        Raises
+        ------
+        ValueError
+            If the keyboard is not initialized or parameters are invalid.
+        TimeoutError
+            If ``timeout_seconds`` is reached.
 
-        Returns:
-            perf_counter timestamp at which the condition was satisfied.
-
-        Notes on stability:
-            - We throttle verbose prints to at most once every 0.5s.
-            - If any key is detected above release_max, we add a tiny pause (10 ms)
-            to reduce CPU pegging and avoid UI stalls on some systems.
+        Notes
+        -----
+        Sampling is scheduled at 1000 Hz. Timing precision follows the instance
+        ``timing_mode``.
         """
         if not getattr(self, "initialized", False):
             raise ValueError('Keyboard must be initialized through "initialize_keyboard()".')
@@ -1424,6 +2130,9 @@ class WOOTING_ACQUISITION:
             raise ValueError("release_max must be in [0, 1]")
 
         target_codes = self._to_keycodes(target_keys)
+        exit_key_set = {str(key).lower() for key in exit_keys}
+        if response_handler is not None and hasattr(response_handler, "keys_to_listen"):
+            response_handler.keys_to_listen = sorted(exit_key_set)
 
         interval = 1.0 / 1000.0  # fixed 1000 Hz
         next_t = time.perf_counter()
@@ -1472,6 +2181,8 @@ class WOOTING_ACQUISITION:
 
             if deadline is not None and now >= deadline:
                 raise TimeoutError("wait_keys_released: timeout exceeded")
+            if self._visual_exit_requested(response_handler, exit_key_set):
+                return None
 
             pos_map = self._read_positions_for_targets(target_codes)
 
@@ -1483,6 +2194,9 @@ class WOOTING_ACQUISITION:
                 if v > RELEASE_MAX:
                     all_released = False
                     offenders_pressed.append((int(code), v))
+
+            if on_tick is not None:
+                on_tick()
 
             # If any key is still pressed, tiny pause helps avoid pegging CPU / UI stalls
             if offenders_pressed:
@@ -1543,7 +2257,18 @@ class WOOTING_ACQUISITION:
 # ============================================================
 
 def delete_interface(file: Optional[str] = None):
-    """Remove compiled CFFI artifacts and common build leftovers."""
+    """Remove compiled CFFI artifacts and common build leftovers.
+
+    Parameters
+    ----------
+    file : str, optional
+        Reserved for backward compatibility. The current implementation removes
+        generated interface artifacts from the package interface directory.
+
+    Returns
+    -------
+    None
+    """
     interface_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "interface")
     pattern = os.path.join(interface_dir, "wooting_interface*")
     files = glob.glob(pattern)

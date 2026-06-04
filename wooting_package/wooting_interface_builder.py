@@ -32,22 +32,46 @@ Script is called in the __init__.py
 The script detects the platform and uses the appropriate build settings.
 """
 import os
-import sysconfig
 import platform
 import subprocess
-from cffi import FFI
-from wooting_package.text_extraction import extract_header_code
+import sysconfig
 
-CURRENT_DIR   = os.path.dirname(os.path.abspath(__file__))
-INTERFACE_DIR = os.path.join(CURRENT_DIR, 'interface')
-LIBRARIES_DIR = os.path.join(CURRENT_DIR, 'libraries')
+from cffi import FFI
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+INTERFACE_DIR = os.path.join(CURRENT_DIR, "interface")
+LIBRARIES_DIR = os.path.join(CURRENT_DIR, "libraries")
 
 SDK_LIBRARY_NAME = "wooting_analog_sdk"
 WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
-COMMON_HEADER_FILENAME  = "wooting-analog-common.h"
+COMMON_HEADER_FILENAME = "wooting-analog-common.h"
 WRAPPER_HEADER_FILENAME = "wooting-analog-wrapper.h"
 
-system = platform.system().lower() # 'darwin', 'linux', 'windows'
+SYSTEM = platform.system().lower()
+
+
+def extract_header_code(common_header_path, wrapper_header_path):
+    comment_chars = ("#", "/", "*")
+
+    with open(common_header_path, encoding="utf-8") as file:
+        common_header_content = file.readlines()
+    with open(wrapper_header_path, encoding="utf-8") as file:
+        wrapper_header_content = file.readlines()
+
+    extracted_code_common = []
+    for line in common_header_content:
+        stripped_line = line.lstrip()
+        if stripped_line and stripped_line[0] not in comment_chars and "extern" not in stripped_line:
+            extracted_code_common.append(line)
+
+    extracted_code_wrapper = []
+    for line in wrapper_header_content:
+        stripped_line = line.lstrip()
+        if stripped_line and stripped_line[0] not in comment_chars and "extern" not in stripped_line:
+            extracted_code_wrapper.append(line)
+
+    return "".join(extracted_code_common), "".join(extracted_code_wrapper)
+
 
 def _norm_arch():
     """Normalize architecture names we care about."""
@@ -56,84 +80,96 @@ def _norm_arch():
         return "arm64"
     if arch in ("x86_64", "amd64"):
         return "x86_64"
-    return "arm64" # Default
+    raise RuntimeError(f"Unsupported CPU architecture: {arch}")
+
 
 def get_library_dir():
     """Return the correct library directory based on platform and architecture."""
-    base_dir = os.path.join(LIBRARIES_DIR, system)
-    if system == "darwin": # .../libraries/darwin/arm64 or x86_64
-        arch = _norm_arch()
-        return os.path.join(base_dir, arch)
-    else : # no arch subfolder
-        return base_dir
+    if SYSTEM not in {"darwin", "linux", "windows"}:
+        raise RuntimeError(f"Unsupported platform: {SYSTEM}")
 
-def get_library_dir():
-    """Return the correct library directory based on platform and architecture."""
-    base_dir = os.path.join(LIBRARIES_DIR, system)
-    if system == "darwin":  # .../libraries/darwin/arm64 or x86_64
+    # macOS ships separate SDK binaries per architecture; Linux/Windows use one folder.
+    base_dir = os.path.join(LIBRARIES_DIR, SYSTEM)
+    if SYSTEM == "darwin":
         arch = _norm_arch()
         return os.path.join(base_dir, arch)
-    else:
-        # linux/windows: pas de sous-dossier d'archi dans ton layout actuel
-        return base_dir
-            
+    return base_dir
+
+
 def get_platform_config(library_dir):
     """Return platform-specific compile/link configuration."""
     arch = _norm_arch()
-
-    # This ensures that the compiler can find the Python C headers required to build the CFFI extension.
+    # CFFI compiles a Python extension, so the Python C headers must be discoverable.
     py_inc = sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_paths()["include"]
 
-    if system == 'darwin':  # macOS
+    if SYSTEM == "darwin":
         compile_args = [
-            f'-I{library_dir}',  # headers
+            f"-I{library_dir}",
         ]
-        # rpath must include the arch subfolder so the .so finds the dylibs next to the package
+        # @loader_path resolves relative to the compiled extension at runtime.
         extra_link_args = [
-            f'-Wl,-rpath,@loader_path/../libraries/darwin/{arch}'
+            f"-Wl,-rpath,@loader_path/../libraries/darwin/{arch}",
         ]
         system_libs = []
 
-    elif system == 'linux':
+    elif SYSTEM == "linux":
         compile_args = [
-            '-Wall', '-Wextra', '-g', '-O0',
-            f'-I{library_dir}',
-            f'-I{py_inc}',
+            "-Wall",
+            "-Wextra",
+            "-O2",
+            f"-I{library_dir}",
+            f"-I{py_inc}",
         ]
-        # ELF: $ORIGIN resolves to the directory of the loaded binary
-        # -Wl,-rpath-link allows the linker to find dependencies during compilation
+        # $ORIGIN resolves relative to the compiled extension on ELF platforms.
         extra_link_args = [
-            '-Wl,-rpath,$ORIGIN/../libraries/linux'
+            "-Wl,-rpath,$ORIGIN/../libraries/linux",
         ]
         system_libs = []
 
-    else:  # Windows
+    else:
         compile_args = [
-            '/W4',  # warnings
-            '/Zi',  # debug info
-            '/Od',  # no optimization (dev)
+            "/W4",
+            "/O2",
         ]
-        extra_link_args = []  # rpath is not used on Windows
+        extra_link_args = []
         system_libs = [
-            'ws2_32', 'kernel32', 'advapi32', 'ntdll', 'bcrypt', 'userenv'
+            "ws2_32",
+            "kernel32",
+            "advapi32",
+            "ntdll",
+            "bcrypt",
+            "userenv",
         ]
 
     return {
-        'compile_args': compile_args,
-        'extra_link_args': extra_link_args,
-        'system_libs': system_libs,
+        "compile_args": compile_args,
+        "extra_link_args": extra_link_args,
+        "system_libs": system_libs,
     }
 
 
-def build_interface():
-    """Build the Python interface for the Wooting Analog SDK.""" # OLD
-    print("\n\nBuilding Wooting interface...")
+def create_ffibuilder(module_name: str = "wooting_interface") -> FFI:
+    """Create a CFFI builder for the Wooting Analog SDK wrapper.
+
+    Parameters
+    ----------
+    module_name : str, default="wooting_interface"
+        Name of the generated Python extension module.
+
+    Returns
+    -------
+    cffi.FFI
+        Configured CFFI builder.
+
+    Raises
+    ------
+    FileNotFoundError
+        If required Wooting SDK headers are missing for the current platform.
+    """
     library_dir = get_library_dir()
-    print(f"\n\tUsing libraries from: {library_dir}")
-    os.makedirs(INTERFACE_DIR, exist_ok=True)
 
     # Verify header presence
-    common_header_path  = os.path.join(library_dir, COMMON_HEADER_FILENAME)
+    common_header_path = os.path.join(library_dir, COMMON_HEADER_FILENAME)
     wrapper_header_path = os.path.join(library_dir, WRAPPER_HEADER_FILENAME)
     if not os.path.isfile(common_header_path):
         raise FileNotFoundError(f"Missing header: {common_header_path}")
@@ -150,19 +186,42 @@ def build_interface():
     ffib.cdef(wrapper_header_code)
     cfg = get_platform_config(library_dir)
 
-
-    # Keep the module name 'wooting_interface' (import via: from interface import lib, ffi)
+    # Keep the generated module name stable: interface/__init__.py imports this exact name.
     ffib.set_source(
-        'wooting_interface',
-        f'#include <{WRAPPER_HEADER_FILENAME}>\n',
-        libraries=[SDK_LIBRARY_NAME, WRAPPER_LIBRARY_NAME] + cfg['system_libs'],
+        module_name,
+        f"#include <{WRAPPER_HEADER_FILENAME}>\n",
+        libraries=[SDK_LIBRARY_NAME, WRAPPER_LIBRARY_NAME] + cfg["system_libs"],
         library_dirs=[library_dir],
-        extra_compile_args=cfg['compile_args'],
-        extra_link_args=cfg['extra_link_args'],
+        extra_compile_args=cfg["compile_args"],
+        extra_link_args=cfg["extra_link_args"],
     )
+    return ffib
+
+
+ffibuilder = create_ffibuilder("wooting_package.interface.wooting_interface")
+
+
+def build_interface():
+    """Compile the Wooting CFFI extension in the package interface directory.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    Exception
+        Propagates compiler, linker, or CFFI errors so callers can present a
+        clear installation failure.
+    """
+    print("\n\nBuilding Wooting interface...")
+    print(f"\n\tUsing libraries from: {get_library_dir()}")
+    os.makedirs(INTERFACE_DIR, exist_ok=True)
+    ffib = create_ffibuilder("wooting_interface")
 
     old_cwd = os.getcwd()
     try:
+        # CFFI writes generated .c/.o/.so artifacts to the current working directory.
         os.chdir(INTERFACE_DIR)
         ffib.compile(verbose=True)
         print("\n\tInterface compiled successfully!\n")
