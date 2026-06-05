@@ -14,7 +14,8 @@ wooting_package.feedback
 # with `wooting-build-interface` so imports stay safe in tests, docs, and CI.
 from .interface import lib, ffi
 from .wooting_interface_builder import build_interface
-from .wooting_utils import WOOTING_ACQUISITION, convert_char_to_keycode, delete_interface
+from .wooting_utils import WOOTING_ACQUISITION, convert_char_to_keycode
+from .package_setup import delete_interface
 
 __all__ = [
     "WOOTING_ACQUISITION",

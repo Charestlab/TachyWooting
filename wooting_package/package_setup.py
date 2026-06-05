@@ -1,20 +1,39 @@
 """
-Post-installation setup script for Wooting keyboard interface.
+Orchestrates installation and removal of the Wooting package on the host system.
 
-This script handles:
-- Platform-specific permission setup (macOS/Linux)
-- Building the CFFI interface if needed
-- macOS Gatekeeper quarantine removal and code signing
+This is the high-level counterpart to wooting_interface_builder.py:
 
-Run this once after installing the package.
+    wooting_interface_builder.py  — *how* to compile the CFFI extension (low-level,
+                                    must stay a separate file for setup.py / cffi_modules)
+    package_setup.py              — *when and in what order* to build, install, and
+                                    clean up (permissions, plugins, Gatekeeper, CFFI)
+
+CLI entry points
+----------------
+wooting-build-interface   →  run_post_install()
+wooting-delete-interface  →  main_delete_interface()
+
+Typical first-time setup
+------------------------
+    pip install -e .
+    wooting-build-interface   # builds the CFFI .so, installs plugins system-wide
+
+Cleanup
+-------
+    wooting-delete-interface            # removes .so + system plugins (default)
+    wooting-delete-interface --no-plugins  # removes .so only
 """
 
+import argparse
 import glob
 import os
 import platform
+import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
+from typing import Optional
 
 
 # --- Paths ---
@@ -54,7 +73,7 @@ def setup_permissions() -> None:
     """
     Run platform-specific permission script only if the interface
     is not yet compiled. No-op if compiled or on unsupported OS.
-    
+
     NOTE: This is called during post-installation, not on every import.
     """
     if _compiled_interface_present():
@@ -85,22 +104,22 @@ def install_plugins() -> None:
     r"""
     Install Wooting SDK and plugins to system directories.
     This is required for the SDK to detect and initialize devices.
-    
+
     Installation structure:
     - SDK library: /usr/local/lib/ (Linux/macOS)
     - Plugins: /usr/local/share/WootingAnalogPlugins/ (Linux/macOS)
     - Windows: C:\Program Files\WootingAnalogPlugins\
-    
+
     Requires sudo/admin privileges on Linux/macOS.
     """
     system = platform.system()
-    
+
     if system not in _PLUGIN_DIRS:
         print(f"[Wooting] Plugin installation not supported on {system}")
         return
-    
+
     plugin_dir = _PLUGIN_DIRS[system]
-    
+
     # Determine source directories and files based on platform
     if system == "Darwin":
         arch = platform.machine()  # 'arm64' or 'x86_64'
@@ -121,7 +140,7 @@ def install_plugins() -> None:
         sdk_files = ["wooting_analog_sdk.dll"]
     else:
         return
-    
+
     # Check if source files exist
     all_files = plugin_files + sdk_files
     missing_files = []
@@ -129,53 +148,52 @@ def install_plugins() -> None:
         file_path = os.path.join(source_dir, file_name)
         if not os.path.exists(file_path):
             missing_files.append(file_name)
-    
+
     if missing_files:
         print(f"[Wooting] Warning: Required files not found: {', '.join(missing_files)}")
         return
-    
+
     try:
         # Install SDK to /usr/local/lib (or system lib directory)
         print(f"[Wooting] Installing SDK to {sdk_dest}...")
-        
+
         if system in ["Linux", "Darwin"]:
             # Create lib directory if needed
             if not os.path.exists(sdk_dest):
                 subprocess.run(["sudo", "mkdir", "-p", sdk_dest], check=True)
-            
+
             # Copy SDK files
             for sdk_file in sdk_files:
                 source_path = os.path.join(source_dir, sdk_file)
                 dest_path = os.path.join(sdk_dest, sdk_file)
                 subprocess.run(["sudo", "cp", source_path, dest_path], check=True)
                 subprocess.run(["sudo", "chmod", "755", dest_path], check=True)
-            
+
             # Run ldconfig to update library cache
             subprocess.run(["sudo", "ldconfig"], check=False)
-        
+
         # Install plugins to plugin directory
         print(f"[Wooting] Installing plugins to {plugin_dir}...")
-        
+
         if not os.path.exists(plugin_dir):
             if system in ["Linux", "Darwin"]:
                 subprocess.run(["sudo", "mkdir", "-p", plugin_dir], check=True)
             else:
                 os.makedirs(plugin_dir, exist_ok=True)
-        
+
         # Copy plugin files
         for plugin_file in plugin_files:
             source_path = os.path.join(source_dir, plugin_file)
             dest_path = os.path.join(plugin_dir, plugin_file)
-            
+
             if system in ["Linux", "Darwin"]:
                 subprocess.run(["sudo", "cp", source_path, dest_path], check=True)
                 subprocess.run(["sudo", "chmod", "755", dest_path], check=True)
             else:
-                import shutil
                 shutil.copy2(source_path, dest_path)
-        
+
         print(f"[Wooting] SDK and plugins installed successfully.")
-        
+
     except subprocess.CalledProcessError as e:
         print(f"[Wooting] Failed to install (may require sudo): {e}")
     except Exception as e:
@@ -186,22 +204,22 @@ def uninstall_plugins() -> None:
     """
     Remove installed Wooting SDK and plugins from system directories.
     This is useful for cleanup and testing.
-    
+
     Removes:
     - SDK library from /usr/local/lib/ (Linux/macOS)
     - Plugin directory /usr/local/share/WootingAnalogPlugins/
     - Udev rules /etc/udev/rules.d/70-wooting.rules (Linux)
-    
+
     Requires sudo/admin privileges on Linux/macOS.
     """
     system = platform.system()
-    
+
     if system not in _PLUGIN_DIRS:
         print(f"[Wooting] Plugin uninstallation not supported on {system}")
         return
-    
+
     plugin_dir = _PLUGIN_DIRS[system]
-    
+
     # Determine SDK location and files based on platform
     if system == "Darwin":
         sdk_dir = "/usr/local/lib"
@@ -214,7 +232,7 @@ def uninstall_plugins() -> None:
         sdk_files = ["wooting_analog_sdk.dll"]
     else:
         return
-    
+
     try:
         # Remove plugins directory
         if os.path.exists(plugin_dir):
@@ -222,9 +240,8 @@ def uninstall_plugins() -> None:
             if system in ["Linux", "Darwin"]:
                 subprocess.run(["sudo", "rm", "-rf", plugin_dir], check=True)
             else:
-                import shutil
                 shutil.rmtree(plugin_dir, ignore_errors=True)
-        
+
         # Remove SDK files from lib directory (Linux/macOS only)
         if system in ["Linux", "Darwin"]:
             print(f"[Wooting] Removing SDK from {sdk_dir}...")
@@ -232,10 +249,10 @@ def uninstall_plugins() -> None:
                 sdk_path = os.path.join(sdk_dir, sdk_file)
                 if os.path.exists(sdk_path):
                     subprocess.run(["sudo", "rm", sdk_path], check=True)
-            
+
             # Update library cache
             subprocess.run(["sudo", "ldconfig"], check=False)
-        
+
         # Remove udev rules on Linux
         if system == "Linux":
             udev_rules = "/etc/udev/rules.d/70-wooting.rules"
@@ -247,9 +264,9 @@ def uninstall_plugins() -> None:
                     print("[Wooting] Udev rules removed successfully.")
                 except subprocess.CalledProcessError as e:
                     print(f"[Wooting] Failed to remove udev rules: {e}")
-        
+
         print(f"[Wooting] SDK and plugins removed successfully.")
-        
+
     except subprocess.CalledProcessError as e:
         print(f"[Wooting] Failed to remove (may require sudo): {e}")
     except Exception as e:
@@ -323,6 +340,55 @@ def build_interface_if_needed() -> None:
         raise RuntimeError(f"[Wooting] Failed to build CFFI interface: {e}") from e
 
 
+def delete_interface(file: Optional[str] = None, cleanup_plugins: bool = True) -> None:
+    """Remove compiled CFFI artifacts, __pycache__, and egg-info leftovers.
+
+    Parameters
+    ----------
+    file : str, optional
+        If given, also removes a same-named file from the project root
+        (legacy behaviour, kept for backward compatibility).
+    cleanup_plugins : bool
+        When True (default) also calls :func:`uninstall_plugins`.
+    """
+    interface_dir = os.path.join(_PKG_DIR, "interface")
+    for file_path in glob.glob(os.path.join(interface_dir, "wooting_interface*")):
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+
+    for pycache_dir in [
+        os.path.join(_PKG_DIR, "__pycache__"),
+        os.path.join(_PKG_DIR, "interface", "__pycache__"),
+    ]:
+        if os.path.isdir(pycache_dir):
+            try:
+                shutil.rmtree(pycache_dir)
+            except Exception:
+                pass
+
+    if file:
+        project_root = os.path.dirname(_PKG_DIR)
+        for filename in [file, "plot.png"]:
+            fp = os.path.join(project_root, filename)
+            if os.path.isfile(fp):
+                try:
+                    os.remove(fp)
+                except OSError:
+                    pass
+
+    egg_info_dir = os.path.join(os.path.dirname(_PKG_DIR), "wooting_interface.egg-info")
+    if os.path.isdir(egg_info_dir):
+        try:
+            shutil.rmtree(egg_info_dir)
+        except Exception:
+            pass
+
+    if cleanup_plugins:
+        uninstall_plugins()
+
+
 def run_post_install() -> None:
     """Run permissions, native interface build, and macOS Gatekeeper setup.
 
@@ -335,20 +401,53 @@ def run_post_install() -> None:
     This function backs the ``wooting-build-interface`` console script.
     """
     print("\n[Wooting] Running post-installation setup...\n")
-    
+
     # 1) Setup permissions (only if not compiled yet)
     setup_permissions()
-    
+
     # 2) Build interface on first import if missing
     build_interface_if_needed()
-    
+
     # 3) Install plugins (required for SDK to work)
     install_plugins()
-    
+
     # 4) Apply macOS Gatekeeper fixups (best-effort), now that files likely exist
     apply_macos_gatekeeper()
 
     print("\n[Wooting] Post-installation setup completed.\n")
+
+
+def main_delete_interface() -> None:
+    """CLI entry point for the ``wooting-delete-interface`` command."""
+    parser = argparse.ArgumentParser(
+        description="Remove the compiled Wooting CFFI interface and system plugins.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  wooting-delete-interface                    # Remove interface + plugins (default)
+  wooting-delete-interface --no-plugins       # Remove interface only, keep plugins
+        """,
+    )
+    parser.add_argument(
+        "--no-plugins",
+        action="store_true",
+        help="Keep system-wide installed plugins (skip sudo removal)",
+    )
+    args = parser.parse_args()
+
+    cleanup_plugins = not args.no_plugins
+    try:
+        print("\n[Wooting] Removing compiled interface...")
+        if cleanup_plugins:
+            print("[Wooting] System plugins will also be removed...")
+        delete_interface(cleanup_plugins=cleanup_plugins)
+        print("[Wooting] Done.\n")
+    except KeyboardInterrupt:
+        print("\n[Wooting] Cancelled.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[Wooting] Failed: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

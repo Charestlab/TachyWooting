@@ -1,35 +1,61 @@
 """
-Wooting Interface Builder
+Low-level CFFI compilation for the Wooting Analog SDK Python bindings.
 
-This script builds the Python interface for the Wooting Analog SDK using CFFI.
+This file is kept separate from package_setup.py for a hard technical reason:
+setup.py must reference it by file path via the cffi_modules keyword:
 
-Components:
------------
-wooting-analog-sdk: The core Analog SDK which handles loading of plugins. This is installed systemwide and is updated separately.
-wooting-analog-common: Common Analog SDK definitions used by all parts.
-wooting-analog-plugin-dev: Common elements needed for designing plugins. This re-exports wooting-analog-common, so plugins do not have to depend on it separately.
-wooting-analog-wrapper: The SDK wrapper used by applications to communicate with the SDK. The linked DLL/dylib/so should be shipped with the application.
-wooting-analog-test-plugin: Dummy plugin using shared memory so other processes can control output (used for unit testing and the virtual keyboard).
-wooting-analog-virtual-kb: Virtual Keyboard (GTK) to set analog values for keys through the dummy plugin — useful for testing without an analog device.
-wooting-analog-sdk-updater: Tool to update the Analog SDK from GitHub releases.
+    cffi_modules=["wooting_package/wooting_interface_builder.py:ffibuilder"]
 
-Headers:
---------
-wooting-analog-wrapper.h: Includes everything needed to use the SDK (uses wooting-analog-common.h for enums/structs).
-wooting-analog-common.h: Defines common enums/headers/structs needed by plugins and SDK users.
-wooting-analog-plugin-dev.h: Includes wooting-analog-common.h and additional functions from the analog-sdk-common static library (for plugins).
-plugin.h: Header plugins should use to define exported functions.
+CFFI's setuptools plugin reads that file directly and expects a module-level
+``ffibuilder`` object. Merging this into package_setup.py would break that
+mechanism.
 
-Dependencies:
-------------
-- CFFI: to build the Python interface
-- Platform-specific SDK libraries (dll/dylib/so)
-- Platform-specific header files
+Responsibilities
+----------------
+- Parse the C headers shipped with the SDK (wooting-analog-wrapper.h, etc.)
+- Configure the FFI builder with platform-specific library paths and flags
+- Compile the Python extension module:
+      wooting_package/interface/wooting_interface.<platform>.so  (Linux/macOS)
+      wooting_package/interface/wooting_interface.<platform>.pyd (Windows)
 
-Usage:
-------
-Script is called in the __init__.py
-The script detects the platform and uses the appropriate build settings.
+Do NOT put orchestration logic here (permissions, plugin install, CLI entry
+points). That belongs in package_setup.py, which calls build_interface() from
+this module.
+
+SDK Components
+--------------
+wooting-analog-sdk
+    Core Analog SDK. Handles loading of plugins. Installed system-wide and
+    updated separately from this package.
+wooting-analog-common
+    Common definitions (enums, structs) shared by all SDK components.
+wooting-analog-plugin-dev
+    Elements needed to write plugins. Re-exports wooting-analog-common, so
+    plugins do not need to depend on it separately.
+wooting-analog-wrapper
+    The wrapper applications link against to talk to the SDK. The compiled
+    dylib/dll/so is shipped inside this Python package (wooting_package/libraries/).
+wooting-analog-test-plugin
+    Dummy plugin backed by shared memory so other processes can inject key
+    values — used for unit testing and the virtual keyboard.
+wooting-analog-virtual-kb
+    GTK virtual keyboard that drives the test plugin; useful for development
+    without a physical analog device.
+wooting-analog-sdk-updater
+    Standalone tool for updating the SDK from GitHub releases.
+
+C Headers
+---------
+wooting-analog-wrapper.h
+    Top-level header for SDK consumers. Pulls in wooting-analog-common.h for
+    enums and structs.
+wooting-analog-common.h
+    Common enums, structs, and constants used by both plugins and SDK users.
+wooting-analog-plugin-dev.h
+    Extends wooting-analog-common.h with functions from the static
+    analog-sdk-common library needed when writing plugins.
+plugin.h
+    Minimal header that plugins must use to export their entry-point functions.
 """
 import os
 import platform
