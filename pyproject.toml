@@ -79,9 +79,10 @@ wooting_package = [
 [project.scripts]
 wooting-demo = "wooting_package.demos.cli:main"
 wooting-build-interface = "wooting_package.post_install:run_post_install"
-wooting-delete-interface = "wooting_package.wooting_utils:delete_interface"
+wooting-delete-interface = "wooting_package.wooting_utils:main_delete_interface"
 wooting-visual-fixation-demo = "wooting_package.demos.visual_fixation_demo:main"
 wooting-mini-bw-experiment = "wooting_package.demos.mini_bw_experiment:main"
+wooting-visualize = "wooting_package.visualize:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

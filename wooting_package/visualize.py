@@ -19,6 +19,7 @@ The plot shows:
 """
 import argparse
 import sys
+from typing import Optional
 
 import h5py
 import numpy as np
@@ -44,7 +45,7 @@ def _load_values(f: h5py.File, trial4: str, key4: str) -> h5py.Dataset:
         raise TypeError(f"{path} is not a dataset")
     return ds
 
-def visualize(ds: h5py.Dataset, head_n: int = 10) -> None:
+def visualize(ds: h5py.Dataset, head_n: int = 10, save_path: Optional[str] = None) -> None:
     try:
         import matplotlib.pyplot as plt
     except ImportError as exc:
@@ -83,7 +84,11 @@ def visualize(ds: h5py.Dataset, head_n: int = 10) -> None:
         ax.set_xlim(xmin - pad, xmax + pad)
 
     plt.tight_layout()
-    plt.show()
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Plot saved to {save_path}")
+    else:
+        plt.show()
 
 def main():
     ap = argparse.ArgumentParser(description="Visualize /trials/<trial>/keys/<key>/values from an HDF5 file.")

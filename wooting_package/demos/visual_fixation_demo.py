@@ -192,7 +192,7 @@ def main() -> int:
         if hasattr(screen, "hide_mouse"):
             screen.hide_mouse()
 
-        response_handler = ResponseHandler()
+        response_handler = ResponseHandler(screen=screen)
         response_handler.keys_to_listen = sorted(QUIT_KEYS)
 
         fixation_widget = TachyPyInteractiveFixationCross(

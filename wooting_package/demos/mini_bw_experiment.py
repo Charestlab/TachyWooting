@@ -24,7 +24,7 @@ def main() -> int:
     try:
         screen = Screen(fullscreen=False)
         screen.hide_mouse()
-        rh = ResponseHandler()
+        rh = ResponseHandler(screen=screen)
         rh.keys_to_listen = sorted(QUIT_KEYS)
 
         w, h = screen.width, screen.height
