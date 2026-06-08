@@ -46,7 +46,7 @@ visualize = [
     "matplotlib>=3.6.0",
 ]
 tachypy = [
-    "tachypy @ git+https://github.com/Charestlab/tachypy.git",
+    "tachypy",
 ]
 dev = [
     "black>=23.0.0",

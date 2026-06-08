@@ -24,7 +24,7 @@ def main() -> int:
     try:
         screen = Screen(fullscreen=False)
         screen.hide_mouse()
-        rh = ResponseHandler(screen=screen)
+        rh = ResponseHandler()
         rh.keys_to_listen = sorted(QUIT_KEYS)
 
         w, h = screen.width, screen.height
@@ -33,7 +33,7 @@ def main() -> int:
         white_tex = Texture(np.ones((256, 256, 3), dtype=np.uint8) * 255)
         black_tex = Texture(np.zeros((256, 256, 3), dtype=np.uint8))
 
-        label = Text(text="", font_size=28, color=(0, 0, 0),
+        label = Text(text=".", font_size=28, color=(0, 0, 0),
                      dest_rect=(0, margin, w, margin + 44))
         score = Text(text="Score: —", font_size=24, color=(0, 0, 0),
                      dest_rect=(w - 240, margin + 50, w - margin, margin + 122))

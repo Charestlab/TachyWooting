@@ -91,7 +91,7 @@ class GamifiedFixationWidget:
         timer_rect = self._rect_centered(width / 2, margin + font_size, 220, font_size * 1.8)
         hits_rect = self._rect(margin, margin, 180, font_size * 1.8)
         efficiency_rect = self._rect(width - margin - 220, margin, 220, font_size * 1.8)
-        exit_rect = self._rect(width - margin - 230, height * 0.38, 230, small_font_size * 6.0)
+        exit_rect = self._rect(width - margin - 180, height - margin - small_font_size * 7, 180, small_font_size * 7)
 
         self._timer_text = self._draw_text(
             self._timer_text,
@@ -113,7 +113,7 @@ class GamifiedFixationWidget:
         )
         self._exit_text = self._draw_text(
             self._exit_text,
-            "Exit keys\nEsc\nEnter\nSpace\nQ",
+            "Quit:\n• Esc\n• Enter\n• Space\n• Q",
             exit_rect,
             small_font_size,
         )
@@ -192,7 +192,7 @@ def main() -> int:
         if hasattr(screen, "hide_mouse"):
             screen.hide_mouse()
 
-        response_handler = ResponseHandler(screen=screen)
+        response_handler = ResponseHandler()
         response_handler.keys_to_listen = sorted(QUIT_KEYS)
 
         fixation_widget = TachyPyInteractiveFixationCross(
