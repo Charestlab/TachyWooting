@@ -1777,7 +1777,7 @@ class WOOTING_ACQUISITION:
         # ── appearance ──────────────────────────────────────────────────────
         background_color: tuple[int, int, int] = (128, 128, 128),
         initial_color: tuple[int, int, int] | object = _UNSET,
-        show_pressure_text: bool | object = _UNSET,
+        show_pressure_text: bool | object = False,
         # ── behaviour ───────────────────────────────────────────────────────
         exit_keys: Sequence[str] = ("escape", "esc", "enter", "return", "space", "q"),
         # ── others ──────────────────────────────────────────────────────────
