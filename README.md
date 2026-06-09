@@ -133,3 +133,9 @@ wooting-build-interface
 ```
 
 If no devices are detected, confirm the keyboard is connected, Wootility recognizes it, and platform permissions have been applied.
+
+## Hardware Requirements
+
+This package was developed and tested with the **Wooting UwU** keypad ([wooting.io/uwu](https://wooting.io/uwu)), and its use is strongly recommended for optimal results.
+
+The UwU is a 3-key Hall effect keypad using [**Lekker L45 V2 linear switches**](https://wooting.io/product/lekker-switch-l45-v2) — contactless magnetic sensors with a smooth linear force curve (30–45 cN, no tactile bump). Keys can be configured to actuate at any depth from 0.1mm to 4.0mm.

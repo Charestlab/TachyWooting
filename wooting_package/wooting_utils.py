@@ -27,7 +27,14 @@ from __future__ import annotations
 import os
 import glob
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Literal, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple, Union, Literal, Set
+
+if TYPE_CHECKING:
+    from tachypy import ResponseHandler, Screen, FixationCross
+
+
+class _Drawable(Protocol):
+    def draw(self) -> None: ...
 
 import h5py
 import numpy as np
@@ -1158,8 +1165,8 @@ class WOOTING_ACQUISITION:
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
         trial_start_clock: str = "perf",
-        callback=None,
-        callback_delay=None,
+        callback: Callable[[], None] | None = None,
+        callback_delay: float | None = None,
         quit_key: Optional[Union[str, int]] = None,
     ) -> Dict[str, Dict[str, Dict[str, np.ndarray]]]:
         """
@@ -1336,8 +1343,8 @@ class WOOTING_ACQUISITION:
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
         trial_start_clock: str = "perf",
-        callback=None,
-        callback_delay=None,
+        callback: Callable[[], None] | None = None,
+        callback_delay: float | None = None,
         quit_key: Optional[Union[str, int]] = None,
     ):
         """
@@ -1480,8 +1487,8 @@ class WOOTING_ACQUISITION:
         verbose: bool = False,
         trial_start_ns: Optional[int] = None,
         trial_start_clock: str = "perf",
-        callback=None,
-        callback_delay=None,
+        callback: Callable[[], None] | None = None,
+        callback_delay: float | None = None,
         quit_key: Optional[Union[str, int]] = None,
     ):
         """
@@ -1572,8 +1579,8 @@ class WOOTING_ACQUISITION:
 
     def wait_keys_light_press(
         self,
-        target_keys,
-        quit_key,
+        target_keys: Sequence[str | int],
+        quit_key: str | int,
         hold_seconds: float = 0.30,
         timeout_seconds: float | None = None,
         verbose: bool = False,
@@ -1759,218 +1766,115 @@ class WOOTING_ACQUISITION:
 
     def wait_keys_light_press_visual(
         self,
-        screen,
-        target_keys,
+        target_keys: Sequence[str | int],
+        screen: Screen,
+        response_handler: ResponseHandler | None = None,
+        fixation_cross: FixationCross | None = None,
+        overlay_drawables: Sequence[_Drawable] | None = None,
+        # ── timing ──────────────────────────────────────────────────────────
         hold_seconds: float | None = None,
         timeout_seconds: float | None = None,
-        widget=None,
-        fixation_cross=None,
-        center=None,
-        half_width: float | object = _UNSET,
-        half_height: float | object = _UNSET,
-        thickness: float | object = _UNSET,
-        background_color=(128, 128, 128),
-        initial_color=_UNSET,
-        target_color=_UNSET,
-        vertical_color=None,
+        # ── appearance ──────────────────────────────────────────────────────
+        background_color: tuple[int, int, int] = (128, 128, 128),
+        initial_color: tuple[int, int, int] | object = _UNSET,
         show_pressure_text: bool | object = _UNSET,
-        left_pressure_label: str | None = None,
-        right_pressure_label: str | None = None,
-        response_handler=None,
-        exit_keys=("escape", "esc", "enter", "return", "space", "q"),
+        # ── behaviour ───────────────────────────────────────────────────────
+        exit_keys: Sequence[str] = ("escape", "esc", "enter", "return", "space", "q"),
+        # ── others ──────────────────────────────────────────────────────────
+        widget: Any | None = None,
         verbose: bool = False,
     ) -> bool:
         """
         Wait for two keys to stay in the light-press range while showing visual feedback.
 
-        This is the high-level visual readiness API. In the common case, users
-        only provide a TachyPy screen, a TachyPy response handler, and two target
-        keys. The method creates the default interactive fixation-cross widget,
-        reads Wooting pressure values, updates the widget each frame, flips the
-        screen, and returns when the participant holds both keys in range.
-
         Parameters
         ----------
-        screen : object
-            TachyPy `Screen`-like object. It must expose `flip()`. If it exposes
-            `fill(color)`, the screen is filled with `background_color` each
-            frame before drawing.
-
         target_keys : sequence of str or int
-            Exactly two target keys. The first key controls the left side of the
-            visual feedback; the second key controls the right side. Labels for
-            pressure text are inferred from these values unless
-            `left_pressure_label` / `right_pressure_label` are provided.
+            Exactly two keys. The first controls the left side of the widget,
+            the second the right side.
+
+        screen : TachyPy Screen object
+            TachyPy `Screen`-like object. Must expose `flip()`. If it exposes
+            `fill(color)`, the screen is cleared with `background_color` each frame.
+
+        response_handler : TachyPy ResponseHandler, optional
+            When provided, quit requests and `exit_keys` presses return `False`.
+
+        fixation_cross : TachyPy FixationCross, optional
+            Existing TachyPy `FixationCross`. The auto-created widget copies
+            `center`, `half_width`, `half_height`, `thickness`, and `color`
+            (→ target color + vertical line color) from it. Invalid with `widget`.
+
+        overlay_drawables : sequence, optional
+            Objects with a `.draw()` method called every frame after the widget
+            and before `screen.flip()`. Use to overlay static tachypy `Text`
+            objects without interrupting the pressure loop.
 
         hold_seconds : float, optional
-            Required continuous hold duration, in seconds. If omitted, the value
-            stored on the acquisition object (`self.hold_seconds`) is used.
+            Required continuous hold duration in seconds. Defaults to
+            `self.hold_seconds`.
 
         timeout_seconds : float, optional
-            Maximum time to wait. If provided and exceeded, `TimeoutError` is
-            raised.
-
-        widget : PressureFeedbackWidget, optional
-            Advanced override. If provided, this widget is used directly and no
-            TachyPy widget is created. When `widget` is provided, do not also
-            pass auto-widget configuration arguments such as `fixation_cross`,
-            `half_width`, `target_color`, or `show_pressure_text`; doing so
-            raises `ValueError`.
-
-        fixation_cross : object, optional
-            Existing TachyPy `FixationCross`-like object used to configure the
-            automatically-created widget. Its `center`, `half_width`,
-            `half_height`, `thickness`, and `color` are reused when present.
-            `color` becomes the widget `target_color`.
-
-        center : tuple[float, float], optional
-            Manual center for the automatically-created widget. Ignored when
-            `fixation_cross` provides a center. Invalid with `widget`.
-
-        half_width, half_height : float, optional
-            Manual horizontal and vertical half-size for the automatically-created
-            widget. Invalid with `widget`.
-
-        thickness : float, optional
-            Manual line thickness for the automatically-created widget. Invalid
-            with `widget`.
+            Maximum wait time. Raises `TimeoutError` if exceeded.
 
         background_color : tuple[int, int, int], default=(128, 128, 128)
-            RGB color used to clear the screen each frame and to validate that
-            the widget's initial color is visible.
+            RGB color used to clear the screen each frame.
 
         initial_color : tuple[int, int, int], optional
-            Starting RGB color for the interactive horizontal line while hold
-            progress is zero. Defaults to `(100, 100, 100)` when the widget is
-            created automatically. Invalid with `widget`.
-
-        target_color : tuple[int, int, int], optional
-            Final RGB color reached when hold progress reaches one. Defaults to
-            `(0, 0, 0)` unless copied from `fixation_cross.color`. Invalid with
-            `widget`.
-
-        vertical_color : tuple[int, int, int], optional
-            RGB color for the vertical fixation line. If omitted, the vertical
-            line uses the same interpolated color as the horizontal line.
-            Invalid with `widget`.
+            Starting color of the horizontal bar at zero hold progress.
+            Defaults to `(100, 100, 100)`. Invalid with `widget`.
 
         show_pressure_text : bool, optional
-            Whether the automatically-created widget shows pressure text for keys
-            outside the acceptable pressure interval. Defaults to `True` for this
-            high-level method. Invalid with `widget`.
-
-        left_pressure_label, right_pressure_label : str, optional
-            Text labels for left and right pressure readouts. If omitted, labels
-            are inferred from `target_keys`. Invalid with `widget`.
-
-        response_handler : object, optional
-            TachyPy `ResponseHandler`-like object. If provided, the method calls
-            `get_events()`, checks `should_quit()`, and checks key presses
-            against `exit_keys` on each frame. A quit request returns `False`.
+            Show real-time pressure values (e.g. `"0.45"`) above the cross for
+            keys outside the acceptable range. Defaults to `True`. Invalid
+            with `widget`.
 
         exit_keys : sequence of str, default=("escape", "esc", "enter", "return", "space", "q")
-            Key names that stop the visual wait early when `response_handler` is
-            provided.
+            Keys that abort the wait when `response_handler` is active.
+
+        widget : PressureFeedbackWidget, optional
+            Full custom widget override. When provided, `fixation_cross`,
+            `initial_color`, and `show_pressure_text` are invalid.
 
         verbose : bool, default=False
-            Print a message when readiness is reached.
+            Print a message when the hold condition is satisfied.
 
         Returns
         -------
         bool
-            `True` when both keys were held in the acceptable pressure interval
-            for `hold_seconds`. `False` when the user exits through
-            `response_handler`.
+            `True` when both keys were held in range for `hold_seconds`.
+            `False` when the user exits via `response_handler`.
 
         Raises
         ------
         ValueError
-            If the keyboard is not initialized, if pressure/timing arguments are
-            invalid, if `target_keys` does not contain exactly two keys, or if a
-            custom `widget` is combined with auto-widget configuration arguments.
-
+            Invalid arguments or incompatible parameter combinations.
         TimeoutError
-            If `timeout_seconds` is provided and reached before readiness.
-
+            `timeout_seconds` exceeded before readiness.
         RuntimeError
-            If TachyPy support is required to create the default widget but is not
-            installed.
-
-        Priority
-        --------
-        Widget creation follows this precedence:
-
-        1. If `widget` is provided, it is used directly. All auto-widget
-           configuration arguments are invalid in this case because they would
-           not be applied.
-        2. If `widget` is not provided and `fixation_cross` is provided, the
-           automatic widget copies `center`, `half_width`, `half_height`,
-           `thickness`, and `target_color` from the fixation cross. In this case,
-           `fixation_cross.center` takes priority over `center`,
-           `fixation_cross.half_width` over `half_width`,
-           `fixation_cross.half_height` over `half_height`,
-           `fixation_cross.thickness` over `thickness`, and
-           `fixation_cross.color` over `target_color`.
-        3. If neither `widget` nor `fixation_cross` provides a value, explicit
-           method arguments are used (`center`, `half_width`, `half_height`,
-           `thickness`, `target_color`, etc.).
-        4. If no explicit method argument is provided, default widget values are
-           used. If `center` remains unset, the widget computes the center from
-           `screen.width` / `screen.height`.
-        5. Pressure text labels use `left_pressure_label` /
-           `right_pressure_label` when provided. Otherwise they are inferred from
-           `target_keys`.
+            TachyPy is required but not installed.
 
         Examples
         --------
-        Minimal usage:
+        Minimal:
+
+        >>> acq.wait_keys_light_press_visual(target_keys=["c", "z"], screen=screen)
+
+        With an existing fixation cross (geometry and color copied automatically):
 
         >>> acq.wait_keys_light_press_visual(
-        ...     screen=screen,
-        ...     response_handler=response_handler,
         ...     target_keys=["c", "z"],
-        ... )
-
-        Reuse an existing TachyPy fixation cross:
-
-        >>> acq.wait_keys_light_press_visual(
         ...     screen=screen,
-        ...     response_handler=response_handler,
-        ...     target_keys=["c", "z"],
+        ...     response_handler=rh,
         ...     fixation_cross=fixation,
         ... )
 
-        Complex usage with explicit visual settings:
+        With a fully custom widget:
 
+        >>> widget = TachyPyInteractiveFixationCross(screen=screen, acquisition=acq)
         >>> acq.wait_keys_light_press_visual(
-        ...     screen=screen,
-        ...     response_handler=response_handler,
         ...     target_keys=["c", "z"],
-        ...     hold_seconds=0.30,
-        ...     timeout_seconds=10.0,
-        ...     center=(screen.width // 2, screen.height // 2),
-        ...     half_width=80,
-        ...     half_height=80,
-        ...     thickness=10,
-        ...     background_color=(128, 128, 128),
-        ...     initial_color=(80, 80, 80),
-        ...     target_color=(0, 0, 0),
-        ...     vertical_color=(0, 0, 0),
-        ...     show_pressure_text=True,
-        ...     exit_keys=("escape", "enter", "space", "q"),
-        ... )
-
-        Advanced usage with a custom widget:
-
-        >>> widget = TachyPyInteractiveFixationCross(
         ...     screen=screen,
-        ...     acquisition=acq,
-        ...     show_pressure_text=False,
-        ... )
-        >>> acq.wait_keys_light_press_visual(
-        ...     screen=screen,
-        ...     response_handler=response_handler,
-        ...     target_keys=["c", "z"],
         ...     widget=widget,
         ... )
         """
@@ -1986,30 +1890,16 @@ class WOOTING_ACQUISITION:
         target_codes = self._to_keycodes(target_keys)
         if len(target_codes) != 2:
             raise ValueError("wait_keys_light_press_visual requires exactly two target keys")
-        explicit_left_pressure_label = left_pressure_label is not None
-        explicit_right_pressure_label = right_pressure_label is not None
-        left_pressure_label = left_pressure_label or str(target_keys[0]).upper()
-        right_pressure_label = right_pressure_label or str(target_keys[1]).upper()
 
         if widget is not None:
-            conflicting_widget_args = []
-            for name, value in (
-                ("fixation_cross", fixation_cross),
-                ("center", center),
-                ("half_width", half_width),
-                ("half_height", half_height),
-                ("thickness", thickness),
-                ("initial_color", initial_color),
-                ("target_color", target_color),
-                ("vertical_color", vertical_color),
-                ("show_pressure_text", show_pressure_text),
-            ):
-                if value is not None and value is not _UNSET:
-                    conflicting_widget_args.append(name)
-            if explicit_left_pressure_label:
-                conflicting_widget_args.append("left_pressure_label")
-            if explicit_right_pressure_label:
-                conflicting_widget_args.append("right_pressure_label")
+            conflicting_widget_args = [
+                name for name, value in (
+                    ("fixation_cross", fixation_cross),
+                    ("initial_color", initial_color),
+                    ("show_pressure_text", show_pressure_text),
+                )
+                if value is not None and value is not _UNSET
+            ]
             if conflicting_widget_args:
                 names = ", ".join(conflicting_widget_args)
                 raise ValueError(
@@ -2029,18 +1919,10 @@ class WOOTING_ACQUISITION:
             widget = TachyPyInteractiveFixationCross(
                 screen=screen,
                 fixation_cross=fixation_cross,
-                center=center,
-                half_width=8.0 if half_width is _UNSET else half_width,
-                half_height=8.0 if half_height is _UNSET else half_height,
-                thickness=1.0 if thickness is _UNSET else thickness,
                 background_color=background_color,
                 initial_color=(100, 100, 100) if initial_color is _UNSET else initial_color,
-                target_color=(0, 0, 0) if target_color is _UNSET else target_color,
-                vertical_color=vertical_color,
                 acquisition=self,
                 show_pressure_text=True if show_pressure_text is _UNSET else show_pressure_text,
-                left_pressure_label=left_pressure_label,
-                right_pressure_label=right_pressure_label,
             )
 
         state = PressureFeedbackState(
@@ -2076,6 +1958,9 @@ class WOOTING_ACQUISITION:
 
             widget.update(state)
             widget.draw()
+            if overlay_drawables:
+                for drawable in overlay_drawables:
+                    drawable.draw()
 
             if not hasattr(screen, "flip"):
                 raise AttributeError("screen must expose flip()")
@@ -2111,13 +1996,13 @@ class WOOTING_ACQUISITION:
 
     def wait_keys_released(
         self,
-        target_keys,
+        target_keys: Sequence[str | int],
         hold_seconds: float = 0.30,
         timeout_seconds: float | None = None,
         release_max: float = 0.01,
-        response_handler=None,
-        exit_keys=("escape", "esc", "enter", "return", "space", "q"),
-        on_tick=None,
+        response_handler: ResponseHandler | None = None,
+        exit_keys: Sequence[str] = ("escape", "esc", "enter", "return", "space", "q"),
+        on_tick: Callable[[], None] | None = None,
         verbose: bool = False,
     ) -> float | None:
         """

@@ -26,8 +26,8 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         acquisition=None,
         # Optional real-time pressure text
         show_pressure_text: bool = False,
-        left_pressure_label: str = "Left",
-        right_pressure_label: str = "Right",
+        left_pressure_label: str = "",
+        right_pressure_label: str = "",
         pressure_text_color=None,
         pressure_text_font_size: int | None = None,
         pressure_text_width: float | None = None,
@@ -96,7 +96,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         initial_color = self._as_rgb_color(initial_color, "initial_color")
         target_color = self._as_rgb_color(target_color, "target_color")
         background_color = self._as_rgb_color(background_color, "background_color")
-        vertical_color = None if vertical_color is None else self._as_rgb_color(vertical_color, "vertical_color")
+        vertical_color = target_color if vertical_color is None else self._as_rgb_color(vertical_color, "vertical_color")
         pressure_text_color = (
             None if pressure_text_color is None else self._as_rgb_color(pressure_text_color, "pressure_text_color")
         )
@@ -312,7 +312,8 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         return text_obj
 
     def _format_pressure(self, label: str, pressure: float) -> str:
-        return f"{label}: {pressure:.{self.pressure_text_decimals}f}"
+        prefix = f"{label}: " if label else ""
+        return f"{prefix}{pressure:.{self.pressure_text_decimals}f}"
 
     def _auto_text_font_size(self) -> int:
         return max(10, int(round(min(self.half_width, self.half_height) * 0.55)))
