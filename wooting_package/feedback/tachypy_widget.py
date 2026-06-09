@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from .state import PressureFeedbackState
 from .widgets import PressureFeedbackWidget
 
@@ -32,6 +34,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         pressure_text_height: float | None = None,
         pressure_text_gap: float = 10.0,
         pressure_text_decimals: int = 2,
+        pressure_text_font_name: str | None = None,
     ):
         """
         Create an interactive TachyPy fixation cross for visual pressure feedback.
@@ -130,6 +133,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
             pressure_text_height=pressure_text_height,
             pressure_text_gap=pressure_text_gap,
             pressure_text_decimals=pressure_text_decimals,
+            pressure_text_font_name=pressure_text_font_name,
         )
         self._reset_runtime_state()
 
@@ -168,6 +172,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         pressure_text_height: float | None,
         pressure_text_gap: float,
         pressure_text_decimals: int,
+        pressure_text_font_name: str | None = None,
     ) -> None:
         self.show_pressure_text = bool(show_pressure_text)
         self.left_pressure_label = str(left_pressure_label)
@@ -178,6 +183,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         self.pressure_text_height = float(pressure_text_height or self._auto_text_height())
         self.pressure_text_gap = float(pressure_text_gap)
         self.pressure_text_decimals = int(pressure_text_decimals)
+        self.pressure_text_font_name = pressure_text_font_name or "Helvetica"
 
     def _reset_runtime_state(self) -> None:
         self.left_pressure = 0.0
@@ -296,6 +302,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
                 font_size=self.pressure_text_font_size,
                 color=self.pressure_text_color,
                 dest_rect=dest_rect,
+                font_name=self.pressure_text_font_name,
             )
         else:
             text_obj.set_dest_rect(dest_rect)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 
 from wooting_package import WOOTING_ACQUISITION
@@ -52,12 +53,13 @@ class GamifiedFixationWidget:
         Hold duration used to compute theoretical hit rate and efficiency.
     """
 
-    def __init__(self, screen, fixation_widget, text_cls, started_at: float, hold_seconds: float):
+    def __init__(self, screen, fixation_widget, text_cls, started_at: float, hold_seconds: float, font_name: str = "Helvetica"):
         self.screen = screen
         self.fixation_widget = fixation_widget
         self.text_cls = text_cls
         self.started_at = float(started_at)
         self.hold_seconds = float(hold_seconds)
+        self.font_name = font_name
         self.hits = 0
         self.flash_until = 0.0
         self._timer_text = None
@@ -126,6 +128,7 @@ class GamifiedFixationWidget:
                 font_size=font_size,
                 color=CROSS_COLOR,
                 dest_rect=dest_rect,
+                font_name=self.font_name,
             )
         else:
             text_obj.set_dest_rect(dest_rect)
@@ -192,7 +195,7 @@ def main() -> int:
         if hasattr(screen, "hide_mouse"):
             screen.hide_mouse()
 
-        response_handler = ResponseHandler()
+        response_handler = ResponseHandler(screen=screen)
         response_handler.keys_to_listen = sorted(QUIT_KEYS)
 
         fixation_widget = TachyPyInteractiveFixationCross(
@@ -209,6 +212,7 @@ def main() -> int:
             show_pressure_text=True,
             left_pressure_label=args.left_key.upper(),
             right_pressure_label=args.right_key.upper(),
+            pressure_text_font_name="Helvetica",
         )
         widget = GamifiedFixationWidget(
             screen=screen,
@@ -216,6 +220,7 @@ def main() -> int:
             text_cls=Text,
             started_at=time.perf_counter(),
             hold_seconds=args.hold_seconds,
+            font_name="Helvetica",
         )
 
         print("Press Escape, Enter, Space, or q to quit.")

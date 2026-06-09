@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import time
 
@@ -24,7 +25,7 @@ def main() -> int:
     try:
         screen = Screen(fullscreen=False)
         screen.hide_mouse()
-        rh = ResponseHandler()
+        rh = ResponseHandler(screen=screen)
         rh.keys_to_listen = sorted(QUIT_KEYS)
 
         w, h = screen.width, screen.height
@@ -43,17 +44,17 @@ def main() -> int:
         # --- instructions screen ---
         instructions = Text(
             text=(
-                "Welcome!\n\n"
+                "Welcome!\n \n"
                 "A black or white image will appear.\n"
-                f"Press  {YES_KEY.upper()}  if it is white,  {NO_KEY.upper()}  if it is black.\n\n"
+                f"Press  {YES_KEY.upper()}  if it is white,  {NO_KEY.upper()}  if it is black.\n \n"
                 f"Before each trial, rest your fingers lightly on {YES_KEY.upper()} and {NO_KEY.upper()}.\n"
                 f"The trial starts as soon as the pressure is stable for {acq.hold_seconds} second(s).\n"
-                "After your response, lift your fingers completely off the keys.\n\n"
+                "After your response, lift your fingers completely off the keys.\n \n"
                 f"Press  {YES_KEY.upper()}  to begin."
             ),
             font_size=26,
             color=(0, 0, 0),
-            dest_rect=(w * 0.1, h * 0.15, w * 0.9, h * 0.85),
+            dest_rect=(int(w * 0.1), int(h * 0.15), int(w * 0.9), int(h * 0.85)),
         )
         screen.fill(BG)
         instructions.draw()

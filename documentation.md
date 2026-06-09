@@ -16,13 +16,13 @@ During installation, setuptools builds the CFFI extension from the bundled Wooti
 wooting-build-interface
 ```
 
-Editable development installs can include CLI and visualization dependencies:
+Editable development installs include all optional dependencies (CLI, visualization, TachyPy, and docs):
 
 ```bash
-python -m pip install -e ".[cli,visualize]"
+python -m pip install -e ".[dev]"
 ```
 
-TachyPy feedback support is optional:
+For visual TachyPy feedback support:
 
 ```bash
 python -m pip install -e ".[tachypy]"

@@ -52,7 +52,7 @@ On first use (e.g., `wooting-demo`), the package automatically:
 ### Development Installation
 
 ```bash
-python -m pip install -e ".[cli,visualize]"
+python -m pip install -e ".[dev]"
 wooting-build-interface
 ```
 

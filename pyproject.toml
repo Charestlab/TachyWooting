@@ -33,37 +33,31 @@ keywords = ["wooting", "analog-keyboard", "keyboard", "cffi", "hdf5"]
 dependencies = [
     "cffi>=1.15.0",
     "h5py>=3.8.0",
+    "matplotlib>=3.6.0",
     "numpy>=1.23.0",
+    "rich>=10.0.0",
     "setuptools>=77.0",
+    "tqdm>=4.60.0",
 ]
 
 [project.optional-dependencies]
-cli = [
-    "rich>=10.0.0",
-    "tqdm>=4.60.0",
-]
-visualize = [
-    "matplotlib>=3.6.0",
-]
 tachypy = [
-    "tachypy",
+    "tachypy>=0.1.14",
 ]
 dev = [
     "black>=23.0.0",
     "build>=1.0.0",
-    "pytest>=7.0.0",
-    "ruff>=0.4.0",
-    "twine>=5.0.0",
-    "wooting-analog[cli,tachypy,visualize]",
-]
-docs = [
     "myst-parser>=2.0.0",
+    "pytest>=7.0.0",
     "roman>=4.0",
+    "ruff>=0.4.0",
     "sphinx>=7.0.0",
     "sphinx-rtd-theme>=2.0.0",
+    "twine>=5.0.0",
+    "wooting-analog[tachypy]",
 ]
 all = [
-    "wooting-analog[cli,tachypy,visualize,docs]",
+    "wooting-analog[tachypy,dev]",
 ]
 
 [tool.setuptools.packages.find]

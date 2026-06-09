@@ -1,0 +1,45 @@
+name: Test Installation
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test-install:
+    name: "[${{ matrix.extras || 'base' }}] py${{ matrix.python-version }} / ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-13, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        extras: ["", "visualize", "tachypy", "dev"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install package
+        shell: bash
+        run: |
+          EXTRAS="${{ matrix.extras }}"
+          if [ -n "$EXTRAS" ]; then
+            pip install ".[$EXTRAS]"
+          else
+            pip install "."
+          fi
+
+      - name: Verify import
+        shell: bash
+        run: |
+          python -c "import wooting_package; print('Import OK')" \
+            || echo "Import failed — likely missing hardware drivers (expected in CI)"

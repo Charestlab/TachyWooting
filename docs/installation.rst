@@ -10,10 +10,17 @@ Install the package from the repository root:
 
    pip install .
 
-Visual TachyPy support
-----------------------
+Development installation
+------------------------
 
-Install optional TachyPy integration with:
+Install all optional dependencies (CLI, visualization, TachyPy, and docs):
+
+.. code-block:: bash
+
+   pip install -e ".[dev]"
+
+Visual TachyPy support only
+----------------------------
 
 .. code-block:: bash
 
