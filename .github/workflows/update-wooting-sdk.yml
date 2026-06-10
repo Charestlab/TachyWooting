@@ -1,0 +1,62 @@
+name: Update Wooting SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Wooting SDK version to vendor"
+        required: true
+        default: "0.9.1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-sdk:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Update vendored SDK files
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/update_wooting_sdk.py --version "${{ inputs.version }}"
+
+      - name: Show changes
+        run: git status --short
+
+      - name: Check for SDK changes
+        id: changes
+        run: |
+          if git diff --quiet -- wooting_package/libraries; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No vendored SDK changes."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create update branch
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "update-wooting-sdk-${{ inputs.version }}"
+          git add wooting_package/libraries
+          git commit -m "Update Wooting SDK to ${{ inputs.version }}"
+          git push --force-with-lease origin "update-wooting-sdk-${{ inputs.version }}"
+
+      - name: Open pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --title "Update Wooting SDK to ${{ inputs.version }}" \
+            --body "Updates vendored Wooting SDK assets from the official release." \
+            --base "${{ github.ref_name }}" \
+            --head "update-wooting-sdk-${{ inputs.version }}"

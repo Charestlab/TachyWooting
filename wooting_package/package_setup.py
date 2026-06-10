@@ -42,6 +42,8 @@ _INTERFACE_DIR = os.path.join(_PKG_DIR, "interface")
 _PERM_MAC_SH = os.path.join(_PKG_DIR, "permissions", "PERMISSIONS_mac.sh")
 _PERM_LINUX_SH = os.path.join(_PKG_DIR, "permissions", "PERMISSIONS_linux.sh")
 _LIBRARIES_DIR = os.path.join(_PKG_DIR, "libraries")
+_SDK_LIBRARY_BASENAME = "wooting_analog_sdk"
+_SDK_DIST_LIBRARY_BASENAME = "wooting_analog_sdk_dist"
 
 # Any file produced by cffi will match this pattern
 _COMPILED_GLOB = os.path.join(_INTERFACE_DIR, "wooting_interface*")
@@ -120,50 +122,54 @@ def install_plugins() -> None:
 
     plugin_dir = _PLUGIN_DIRS[system]
 
-    # Determine source directories and files based on platform
+    # Determine source directories and files based on platform. New upstream SDK
+    # archives keep runtime binaries under release/; older vendored layouts kept
+    # them directly in the platform folder.
     if system == "Darwin":
         arch = platform.machine()  # 'arm64' or 'x86_64'
-        source_dir = os.path.join(_LIBRARIES_DIR, "darwin", arch)
+        platform_dir = os.path.join(_LIBRARIES_DIR, "darwin", arch)
         sdk_dest = "/usr/local/lib"
         plugin_files = ["libwooting_analog_plugin.dylib"]
-        sdk_files = ["libwooting_analog_sdk.dylib"]
+        sdk_files = ["libwooting_analog_sdk.dylib", "libwooting_analog_sdk_dist.dylib"]
     elif system == "Linux":
-        source_dir = os.path.join(_LIBRARIES_DIR, "linux")
+        platform_dir = os.path.join(_LIBRARIES_DIR, "linux")
         sdk_dest = "/usr/local/lib"
         plugin_files = ["libwooting_analog_plugin.so"]
-        sdk_files = ["libwooting_analog_sdk.so"]
+        sdk_files = ["libwooting_analog_sdk.so", "libwooting_analog_sdk_dist.so"]
     elif system == "Windows":
-        source_dir = os.path.join(_LIBRARIES_DIR, "windows")
+        platform_dir = os.path.join(_LIBRARIES_DIR, "windows")
         plugin_dir = r"C:\\Program Files\\WootingAnalogPlugins"
         sdk_dest = plugin_dir  # On Windows, everything goes in the same place
         plugin_files = ["wooting_analog_plugin.dll"]
-        sdk_files = ["wooting_analog_sdk.dll"]
+        sdk_files = ["wooting_analog_sdk.dll", "wooting_analog_sdk_dist.dll"]
     else:
         return
 
-    # Check if source files exist
-    all_files = plugin_files + sdk_files
-    missing_files = []
-    for file_name in all_files:
-        file_path = os.path.join(source_dir, file_name)
-        if not os.path.exists(file_path):
-            missing_files.append(file_name)
+    release_dir = os.path.join(platform_dir, "release")
+    source_dir = release_dir if os.path.isdir(release_dir) else platform_dir
 
-    if missing_files:
-        print(f"[Wooting] Warning: Required files not found: {', '.join(missing_files)}")
+    existing_sdk_files = [
+        file_name for file_name in sdk_files if os.path.exists(os.path.join(source_dir, file_name))
+    ]
+    existing_plugin_files = [
+        file_name for file_name in plugin_files if os.path.exists(os.path.join(source_dir, file_name))
+    ]
+    if not existing_sdk_files and not existing_plugin_files:
+        print(f"[Wooting] Warning: no installable SDK files found in {source_dir}")
         return
 
     try:
         # Install SDK to /usr/local/lib (or system lib directory)
-        print(f"[Wooting] Installing SDK to {sdk_dest}...")
+        if existing_sdk_files:
+            print(f"[Wooting] Installing SDK to {sdk_dest}...")
 
-        if system in ["Linux", "Darwin"]:
+        if system in ["Linux", "Darwin"] and existing_sdk_files:
             # Create lib directory if needed
             if not os.path.exists(sdk_dest):
                 subprocess.run(["sudo", "mkdir", "-p", sdk_dest], check=True)
 
             # Copy SDK files
-            for sdk_file in sdk_files:
+            for sdk_file in existing_sdk_files:
                 source_path = os.path.join(source_dir, sdk_file)
                 dest_path = os.path.join(sdk_dest, sdk_file)
                 subprocess.run(["sudo", "cp", source_path, dest_path], check=True)
@@ -172,17 +178,26 @@ def install_plugins() -> None:
             # Run ldconfig to update library cache
             subprocess.run(["sudo", "ldconfig"], check=False)
 
-        # Install plugins to plugin directory
-        print(f"[Wooting] Installing plugins to {plugin_dir}...")
+        if system == "Windows" and existing_sdk_files:
+            if not os.path.exists(sdk_dest):
+                os.makedirs(sdk_dest, exist_ok=True)
+            for sdk_file in existing_sdk_files:
+                shutil.copy2(os.path.join(source_dir, sdk_file), os.path.join(sdk_dest, sdk_file))
 
-        if not os.path.exists(plugin_dir):
-            if system in ["Linux", "Darwin"]:
-                subprocess.run(["sudo", "mkdir", "-p", plugin_dir], check=True)
-            else:
-                os.makedirs(plugin_dir, exist_ok=True)
+        # Install plugins to plugin directory when an archive contains them. The
+        # current official SDK archives may rely on the system Wooting install
+        # for plugins and only ship SDK runtime binaries.
+        if existing_plugin_files:
+            print(f"[Wooting] Installing plugins to {plugin_dir}...")
+
+            if not os.path.exists(plugin_dir):
+                if system in ["Linux", "Darwin"]:
+                    subprocess.run(["sudo", "mkdir", "-p", plugin_dir], check=True)
+                else:
+                    os.makedirs(plugin_dir, exist_ok=True)
 
         # Copy plugin files
-        for plugin_file in plugin_files:
+        for plugin_file in existing_plugin_files:
             source_path = os.path.join(source_dir, plugin_file)
             dest_path = os.path.join(plugin_dir, plugin_file)
 
@@ -192,7 +207,7 @@ def install_plugins() -> None:
             else:
                 shutil.copy2(source_path, dest_path)
 
-        print(f"[Wooting] SDK and plugins installed successfully.")
+        print("[Wooting] SDK setup completed successfully.")
 
     except subprocess.CalledProcessError as e:
         print(f"[Wooting] Failed to install (may require sudo): {e}")
@@ -276,16 +291,17 @@ def uninstall_plugins() -> None:
 def apply_macos_gatekeeper() -> None:
     """
     Best-effort: remove quarantine and ad-hoc sign dylibs shipped in:
-        <pkg>/libraries/darwin/<arch>/
+        <pkg>/libraries/darwin/<arch>/release/
     Runs only on macOS, no-op otherwise. Never raises.
     """
     if platform.system() != "Darwin":
         return
 
     arch = platform.machine()  # 'arm64' or 'x86_64'
-    dylib_dir = Path(_PKG_DIR) / "libraries" / "darwin" / arch
-    sdk_path = dylib_dir / "libwooting_analog_sdk.dylib"
-    wrapper_path = dylib_dir / "libwooting_analog_wrapper.dylib"
+    platform_dir = Path(_PKG_DIR) / "libraries" / "darwin" / arch
+    dylib_dir = platform_dir / "release" if (platform_dir / "release").is_dir() else platform_dir
+    sdk_path = dylib_dir / f"lib{_SDK_LIBRARY_BASENAME}.dylib"
+    sdk_dist_path = dylib_dir / f"lib{_SDK_DIST_LIBRARY_BASENAME}.dylib"
 
     try:
         if dylib_dir.is_dir():
@@ -299,8 +315,8 @@ def apply_macos_gatekeeper() -> None:
         # Sign only if files exist (first install/build may not have copied them yet)
         if sdk_path.exists():
             subprocess.run(["codesign", "--force", "--sign", "-", str(sdk_path)], check=False)
-        if wrapper_path.exists():
-            subprocess.run(["codesign", "--force", "--sign", "-", str(wrapper_path)], check=False)
+        if sdk_dist_path.exists():
+            subprocess.run(["codesign", "--force", "--sign", "-", str(sdk_dist_path)], check=False)
         print("[Wooting] macOS Gatekeeper setup completed.")
     except Exception as e:
         # Never hard-fail here; keep import working and just inform.

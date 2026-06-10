@@ -68,35 +68,33 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 INTERFACE_DIR = os.path.join(CURRENT_DIR, "interface")
 LIBRARIES_DIR = os.path.join(CURRENT_DIR, "libraries")
 
-SDK_LIBRARY_NAME = "wooting_analog_sdk"
-WRAPPER_LIBRARY_NAME = "wooting_analog_wrapper"
+SDK_LIBRARY_NAME = "wooting_analog_sdk_dist"
+SDK_HEADER_FILENAME = "wooting-analog-sdk.h"
 COMMON_HEADER_FILENAME = "wooting-analog-common.h"
 WRAPPER_HEADER_FILENAME = "wooting-analog-wrapper.h"
 
 SYSTEM = platform.system().lower()
 
 
-def extract_header_code(common_header_path, wrapper_header_path):
+def extract_header_code(*header_paths):
     comment_chars = ("#", "/", "*")
 
-    with open(common_header_path, encoding="utf-8") as file:
-        common_header_content = file.readlines()
-    with open(wrapper_header_path, encoding="utf-8") as file:
-        wrapper_header_content = file.readlines()
+    extracted_code = []
+    for header_path in header_paths:
+        with open(header_path, encoding="utf-8") as file:
+            for line in file:
+                stripped_line = line.lstrip()
+                if not stripped_line:
+                    continue
+                if stripped_line[0] in comment_chars:
+                    continue
+                if "extern" in stripped_line:
+                    continue
+                if stripped_line.startswith("}") and "extern" in line:
+                    continue
+                extracted_code.append(line)
 
-    extracted_code_common = []
-    for line in common_header_content:
-        stripped_line = line.lstrip()
-        if stripped_line and stripped_line[0] not in comment_chars and "extern" not in stripped_line:
-            extracted_code_common.append(line)
-
-    extracted_code_wrapper = []
-    for line in wrapper_header_content:
-        stripped_line = line.lstrip()
-        if stripped_line and stripped_line[0] not in comment_chars and "extern" not in stripped_line:
-            extracted_code_wrapper.append(line)
-
-    return "".join(extracted_code_common), "".join(extracted_code_wrapper)
+    return "".join(extracted_code)
 
 
 def _norm_arch():
@@ -109,8 +107,8 @@ def _norm_arch():
     raise RuntimeError(f"Unsupported CPU architecture: {arch}")
 
 
-def get_library_dir():
-    """Return the correct library directory based on platform and architecture."""
+def get_platform_dir():
+    """Return the correct platform SDK directory based on OS and architecture."""
     if SYSTEM not in {"darwin", "linux", "windows"}:
         raise RuntimeError(f"Unsupported platform: {SYSTEM}")
 
@@ -122,7 +120,24 @@ def get_library_dir():
     return base_dir
 
 
-def get_platform_config(library_dir):
+def get_include_dir(platform_dir):
+    """Return the directory containing SDK headers."""
+    include_dir = os.path.join(platform_dir, "includes")
+    return include_dir if os.path.isdir(include_dir) else platform_dir
+
+
+def get_binary_dir(platform_dir):
+    """Return the directory containing SDK link/runtime binaries."""
+    release_dir = os.path.join(platform_dir, "release")
+    return release_dir if os.path.isdir(release_dir) else platform_dir
+
+
+def get_library_dir():
+    """Return the directory containing SDK link/runtime binaries."""
+    return get_binary_dir(get_platform_dir())
+
+
+def get_platform_config(binary_dir, include_dir):
     """Return platform-specific compile/link configuration."""
     arch = _norm_arch()
     # CFFI compiles a Python extension, so the Python C headers must be discoverable.
@@ -130,11 +145,11 @@ def get_platform_config(library_dir):
 
     if SYSTEM == "darwin":
         compile_args = [
-            f"-I{library_dir}",
+            f"-I{include_dir}",
         ]
         # @loader_path resolves relative to the compiled extension at runtime.
         extra_link_args = [
-            f"-Wl,-rpath,@loader_path/../libraries/darwin/{arch}",
+            f"-Wl,-rpath,@loader_path/../libraries/darwin/{arch}/release",
         ]
         system_libs = []
 
@@ -143,12 +158,12 @@ def get_platform_config(library_dir):
             "-Wall",
             "-Wextra",
             "-O2",
-            f"-I{library_dir}",
+            f"-I{include_dir}",
             f"-I{py_inc}",
         ]
         # $ORIGIN resolves relative to the compiled extension on ELF platforms.
         extra_link_args = [
-            "-Wl,-rpath,$ORIGIN/../libraries/linux",
+            "-Wl,-rpath,$ORIGIN/../libraries/linux/release",
         ]
         system_libs = []
 
@@ -156,9 +171,14 @@ def get_platform_config(library_dir):
         compile_args = [
             "/W4",
             "/O2",
-            f"/I{library_dir}",
+            f"/I{include_dir}",
         ]
-        extra_link_args = []
+        # The official Windows archive ships the import library as
+        # wooting_analog_sdk_dist.dll.lib, which MSVC will not find from the
+        # shorter library name alone.
+        extra_link_args = [
+            os.path.join(binary_dir, f"{SDK_LIBRARY_NAME}.dll.lib"),
+        ]
         system_libs = [
             "ws2_32",
             "kernel32",
@@ -173,6 +193,13 @@ def get_platform_config(library_dir):
         "extra_link_args": extra_link_args,
         "system_libs": system_libs,
     }
+
+
+def get_link_libraries(system_libs):
+    """Return native libraries to link for the current platform."""
+    if SYSTEM == "windows":
+        return system_libs
+    return [SDK_LIBRARY_NAME] + system_libs
 
 
 def create_ffibuilder(module_name: str = "wooting_interface") -> FFI:
@@ -193,32 +220,37 @@ def create_ffibuilder(module_name: str = "wooting_interface") -> FFI:
     FileNotFoundError
         If required Wooting SDK headers are missing for the current platform.
     """
-    library_dir = get_library_dir()
+    platform_dir = get_platform_dir()
+    include_dir = get_include_dir(platform_dir)
+    binary_dir = get_binary_dir(platform_dir)
 
-    # Verify header presence
-    common_header_path = os.path.join(library_dir, COMMON_HEADER_FILENAME)
-    wrapper_header_path = os.path.join(library_dir, WRAPPER_HEADER_FILENAME)
-    if not os.path.isfile(common_header_path):
-        raise FileNotFoundError(f"Missing header: {common_header_path}")
-    if not os.path.isfile(wrapper_header_path):
-        raise FileNotFoundError(f"Missing header: {wrapper_header_path}")
+    # Prefer the modern upstream SDK header layout. Keep a fallback for older
+    # vendored layouts so error messages remain useful during updates.
+    sdk_header_path = os.path.join(include_dir, SDK_HEADER_FILENAME)
+    common_header_path = os.path.join(include_dir, COMMON_HEADER_FILENAME)
+    wrapper_header_path = os.path.join(include_dir, WRAPPER_HEADER_FILENAME)
+    if os.path.isfile(sdk_header_path):
+        header_paths = [sdk_header_path]
+    else:
+        if not os.path.isfile(common_header_path):
+            raise FileNotFoundError(f"Missing header: {common_header_path}")
+        if not os.path.isfile(wrapper_header_path):
+            raise FileNotFoundError(f"Missing header: {wrapper_header_path}")
+        header_paths = [common_header_path, wrapper_header_path]
 
     # Extract C declarations from headers
-    common_header_code, wrapper_header_code = extract_header_code(
-        common_header_path, wrapper_header_path
-    )
+    header_code = extract_header_code(*header_paths)
 
     ffib = FFI()
-    ffib.cdef(common_header_code)
-    ffib.cdef(wrapper_header_code)
-    cfg = get_platform_config(library_dir)
+    ffib.cdef(header_code)
+    cfg = get_platform_config(binary_dir, include_dir)
 
     # Keep the generated module name stable: interface/__init__.py imports this exact name.
     ffib.set_source(
         module_name,
-        f"#include <{WRAPPER_HEADER_FILENAME}>\n",
-        libraries=[SDK_LIBRARY_NAME, WRAPPER_LIBRARY_NAME] + cfg["system_libs"],
-        library_dirs=[library_dir],
+        f"#include <{os.path.basename(header_paths[-1])}>\n",
+        libraries=get_link_libraries(cfg["system_libs"]),
+        library_dirs=[binary_dir],
         extra_compile_args=cfg["compile_args"],
         extra_link_args=cfg["extra_link_args"],
     )

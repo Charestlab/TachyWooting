@@ -1,7 +1,10 @@
 import pytest
+import sys
+import tomllib
 
 import wooting_package
-from wooting_package import WOOTING_ACQUISITION, convert_char_to_keycode
+from wooting_package import WOOTING_ACQUISITION, convert_char_to_keycode, package_setup
+from wooting_package import wooting_interface_builder
 
 
 def test_import_does_not_require_built_native_interface():
@@ -20,6 +23,207 @@ def test_acquisition_requires_native_interface_when_missing():
 
     with pytest.raises(RuntimeError, match="wooting-build-interface"):
         WOOTING_ACQUISITION()
+
+
+def test_interface_console_scripts_target_package_setup():
+    with open("pyproject.toml", "rb") as file:
+        scripts = tomllib.load(file)["project"]["scripts"]
+
+    assert scripts["wooting-build-interface"] == "wooting_package.package_setup:run_post_install"
+    assert scripts["wooting-delete-interface"] == "wooting_package.package_setup:main_delete_interface"
+
+
+def test_run_post_install_calls_setup_steps_in_order(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(package_setup, "setup_permissions", lambda: calls.append("permissions"))
+    monkeypatch.setattr(package_setup, "build_interface_if_needed", lambda: calls.append("build"))
+    monkeypatch.setattr(package_setup, "install_plugins", lambda: calls.append("plugins"))
+    monkeypatch.setattr(package_setup, "apply_macos_gatekeeper", lambda: calls.append("gatekeeper"))
+
+    package_setup.run_post_install()
+
+    assert calls == ["permissions", "build", "plugins", "gatekeeper"]
+
+
+def test_main_delete_interface_removes_plugins_by_default(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(sys, "argv", ["wooting-delete-interface"])
+    monkeypatch.setattr(
+        package_setup,
+        "delete_interface",
+        lambda cleanup_plugins=True: calls.append(cleanup_plugins),
+    )
+
+    package_setup.main_delete_interface()
+
+    assert calls == [True]
+
+
+def test_main_delete_interface_can_keep_plugins(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(sys, "argv", ["wooting-delete-interface", "--no-plugins"])
+    monkeypatch.setattr(
+        package_setup,
+        "delete_interface",
+        lambda cleanup_plugins=True: calls.append(cleanup_plugins),
+    )
+
+    package_setup.main_delete_interface()
+
+    assert calls == [False]
+
+
+@pytest.mark.parametrize(
+    ("system", "script_attr"),
+    [
+        ("Darwin", "_PERM_MAC_SH"),
+        ("Linux", "_PERM_LINUX_SH"),
+    ],
+)
+def test_setup_permissions_runs_platform_script(monkeypatch, system, script_attr):
+    calls = []
+    expected_script = getattr(package_setup, script_attr)
+
+    monkeypatch.setattr(package_setup, "_compiled_interface_present", lambda: False)
+    monkeypatch.setattr(package_setup.platform, "system", lambda: system)
+    monkeypatch.setattr(package_setup.os.path, "isfile", lambda path: path == expected_script)
+    monkeypatch.setattr(package_setup, "_make_executable", lambda path: calls.append(("chmod", path)))
+    monkeypatch.setattr(
+        package_setup.subprocess,
+        "run",
+        lambda cmd, check, cwd: calls.append(("run", cmd, check, cwd)),
+    )
+
+    package_setup.setup_permissions()
+
+    assert calls == [
+        ("chmod", expected_script),
+        ("run", ["/bin/bash", expected_script], True, package_setup._PKG_DIR),
+    ]
+
+
+def test_setup_permissions_skips_windows(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(package_setup, "_compiled_interface_present", lambda: False)
+    monkeypatch.setattr(package_setup.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(package_setup, "_make_executable", lambda path: calls.append(path))
+    monkeypatch.setattr(
+        package_setup.subprocess,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    package_setup.setup_permissions()
+
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("system", "expected_native_libs"),
+    [
+        ("windows", []),
+        ("linux", ["wooting_analog_sdk_dist"]),
+        ("darwin", ["wooting_analog_sdk_dist"]),
+    ],
+)
+def test_interface_builder_links_expected_platform_libraries(
+    monkeypatch,
+    system,
+    expected_native_libs,
+):
+    monkeypatch.setattr(wooting_interface_builder, "SYSTEM", system)
+
+    libraries = wooting_interface_builder.get_link_libraries(["example_system_lib"])
+
+    assert libraries == expected_native_libs + ["example_system_lib"]
+
+
+def test_interface_builder_uses_windows_import_library_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(wooting_interface_builder, "SYSTEM", "windows")
+
+    cfg = wooting_interface_builder.get_platform_config(
+        str(tmp_path / "release"),
+        str(tmp_path / "includes"),
+    )
+
+    assert cfg["extra_link_args"] == [
+        str(tmp_path / "release" / "wooting_analog_sdk_dist.dll.lib")
+    ]
+
+
+def test_interface_builder_uses_upstream_include_and_release_dirs(tmp_path):
+    platform_dir = tmp_path / "darwin" / "arm64"
+    include_dir = platform_dir / "includes"
+    release_dir = platform_dir / "release"
+    include_dir.mkdir(parents=True)
+    release_dir.mkdir()
+
+    assert wooting_interface_builder.get_include_dir(str(platform_dir)) == str(include_dir)
+    assert wooting_interface_builder.get_binary_dir(str(platform_dir)) == str(release_dir)
+
+
+def test_interface_builder_falls_back_to_flat_vendor_layout(tmp_path):
+    platform_dir = tmp_path / "linux"
+    platform_dir.mkdir()
+
+    assert wooting_interface_builder.get_include_dir(str(platform_dir)) == str(platform_dir)
+    assert wooting_interface_builder.get_binary_dir(str(platform_dir)) == str(platform_dir)
+
+
+def test_install_plugins_uses_release_directory_without_required_plugin(monkeypatch, tmp_path):
+    release_dir = tmp_path / "libraries" / "linux" / "release"
+    release_dir.mkdir(parents=True)
+    sdk_file = release_dir / "libwooting_analog_sdk_dist.so"
+    sdk_file.write_bytes(b"sdk")
+    calls = []
+
+    monkeypatch.setattr(package_setup.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(package_setup, "_LIBRARIES_DIR", str(tmp_path / "libraries"))
+    monkeypatch.setattr(package_setup.os.path, "exists", lambda path: path == str(sdk_file))
+    monkeypatch.setattr(package_setup.os.path, "isdir", lambda path: path == str(release_dir))
+    monkeypatch.setattr(
+        package_setup.subprocess,
+        "run",
+        lambda cmd, check=False, **kwargs: calls.append((cmd, check, kwargs)),
+    )
+
+    package_setup.install_plugins()
+
+    assert (
+        ["sudo", "cp", str(sdk_file), "/usr/local/lib/libwooting_analog_sdk_dist.so"],
+        True,
+        {},
+    ) in calls
+    assert not any("WootingAnalogPlugins" in " ".join(call[0]) for call in calls)
+
+
+def test_macos_gatekeeper_uses_release_directory(monkeypatch, tmp_path):
+    release_dir = tmp_path / "libraries" / "darwin" / "arm64" / "release"
+    release_dir.mkdir(parents=True)
+    sdk_file = release_dir / "libwooting_analog_sdk.dylib"
+    sdk_dist_file = release_dir / "libwooting_analog_sdk_dist.dylib"
+    sdk_file.write_bytes(b"sdk")
+    sdk_dist_file.write_bytes(b"dist")
+    calls = []
+
+    monkeypatch.setattr(package_setup.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(package_setup.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(package_setup, "_PKG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        package_setup.subprocess,
+        "run",
+        lambda cmd, check=False: calls.append((cmd, check)),
+    )
+
+    package_setup.apply_macos_gatekeeper()
+
+    assert (["xattr", "-dr", "com.apple.quarantine", str(release_dir)], False) in calls
+    assert (["codesign", "--force", "--sign", "-", str(sdk_file)], False) in calls
+    assert (["codesign", "--force", "--sign", "-", str(sdk_dist_file)], False) in calls
 
 
 def test_removal_tracking_statistics():
