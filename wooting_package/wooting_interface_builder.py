@@ -156,6 +156,7 @@ def get_platform_config(library_dir):
         compile_args = [
             "/W4",
             "/O2",
+            f"/I{library_dir}",
         ]
         extra_link_args = []
         system_libs = [

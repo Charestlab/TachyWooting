@@ -184,7 +184,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         self.pressure_text_height = float(pressure_text_height or self._auto_text_height())
         self.pressure_text_gap = float(pressure_text_gap)
         self.pressure_text_decimals = int(pressure_text_decimals)
-        self.pressure_text_font_name = pressure_text_font_name or "Helvetica"
+        self.pressure_text_font_name = pressure_text_font_name
 
     def _reset_runtime_state(self) -> None:
         self.left_pressure = 0.0
@@ -300,13 +300,15 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
 
     def _draw_text(self, text_obj, text: str, dest_rect):
         if text_obj is None:
-            text_obj = self._text_cls(
-                text=text,
-                font_size=self.pressure_text_font_size,
-                color=self.pressure_text_color,
-                dest_rect=dest_rect,
-                font_name=self.pressure_text_font_name,
-            )
+            kwargs = {
+                "text": text,
+                "font_size": self.pressure_text_font_size,
+                "color": self.pressure_text_color,
+                "dest_rect": dest_rect,
+            }
+            if self.pressure_text_font_name is not None:
+                kwargs["font_name"] = self.pressure_text_font_name
+            text_obj = self._text_cls(**kwargs)
         else:
             text_obj.set_dest_rect(dest_rect)
             if text_obj.text != text:

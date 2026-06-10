@@ -1,2 +1,2 @@
-.[cli,visualize]
+.
 setuptools>=77.0

@@ -28,7 +28,7 @@ try:
     from tqdm import tqdm
     from rich.console import Console
 except ImportError:
-    print('Error: Missing CLI dependencies. Install them with: pip install "wooting-analog[cli]"')
+    print('Error: Missing CLI dependencies. Install them with: pip install "wooting-analog"')
     sys.exit(1)
 
 from wooting_package import lib, convert_char_to_keycode

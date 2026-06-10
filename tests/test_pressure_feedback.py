@@ -294,7 +294,7 @@ def test_tachypy_widget_hides_pressure_text_when_pressure_is_ideal(monkeypatch):
     assert FakeText.created == []
 
 
-def test_visual_wait_auto_creates_widget_with_labels_from_target_keys(monkeypatch):
+def test_visual_wait_does_not_show_pressure_text_by_default(monkeypatch):
     class FakeScreen:
         width = 100
         height = 80
@@ -362,7 +362,7 @@ def test_visual_wait_auto_creates_widget_with_labels_from_target_keys(monkeypatc
     acq._read_positions_for_targets = read_positions
 
     assert acq.wait_keys_light_press_visual(screen=FakeScreen(), target_keys=["c", "z"])
-    assert [text.text for text in FakeText.created[:2]] == ["C: 0.00", "Z: 1.00"]
+    assert FakeText.created == []
 
 
 def test_visual_wait_rejects_auto_widget_args_when_widget_is_provided():
@@ -388,10 +388,45 @@ def test_visual_wait_rejects_auto_widget_args_when_widget_is_provided():
     acq.hold_seconds = 0.001
     acq._to_keycodes = lambda keys: [1, 2]
 
-    with pytest.raises(ValueError, match="half_width"):
+    fixation_cross = object()
+
+    with pytest.raises(ValueError, match="fixation_cross"):
         acq.wait_keys_light_press_visual(
             screen=FakeScreen(),
             target_keys=["c", "z"],
             widget=FakeWidget(),
-            half_width=10,
+            fixation_cross=fixation_cross,
+        )
+
+
+def test_visual_wait_rejects_non_drawable_overlay():
+    class FakeScreen:
+        def fill(self, color):
+            pass
+
+        def flip(self):
+            pass
+
+    class FakeWidget:
+        def update(self, state):
+            pass
+
+        def draw(self):
+            pass
+
+    acq = WOOTING_ACQUISITION.__new__(WOOTING_ACQUISITION)
+    acq.initialized = True
+    acq.min_pressure_start = 0.33
+    acq.max_pressure_start = 0.66
+    acq.threshold = 0.8
+    acq.hold_seconds = 0.001
+    acq._to_keycodes = lambda keys: [1, 2]
+    acq._read_positions_for_targets = lambda codes: {1: 0.5, 2: 0.5}
+
+    with pytest.raises(AttributeError, match="draw"):
+        acq.wait_keys_light_press_visual(
+            screen=FakeScreen(),
+            target_keys=["c", "z"],
+            widget=FakeWidget(),
+            overlay_drawables=[object()],
         )

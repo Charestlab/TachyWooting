@@ -290,7 +290,7 @@ def _check_matplotlib() -> None:
         __import__("matplotlib.pyplot")
     except ImportError as exc:
         raise RuntimeError(
-            'matplotlib required. Install with: pip install "wooting-analog[visualize]"'
+            'matplotlib required. Install the package with its base dependencies.'
         ) from exc
 
 

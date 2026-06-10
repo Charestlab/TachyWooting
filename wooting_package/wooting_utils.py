@@ -1904,7 +1904,7 @@ class WOOTING_ACQUISITION:
 
         show_pressure_text : bool, optional
             Show real-time pressure values (e.g. `"0.45"`) above the cross for
-            keys outside the acceptable range. Defaults to `True`. Invalid
+            keys outside the acceptable range. Defaults to `False`. Invalid
             with `widget`.
 
         exit_keys : sequence of str, default=("escape", "esc", "enter", "return", "space", "q")
