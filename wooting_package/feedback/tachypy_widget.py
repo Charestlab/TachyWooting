@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from .state import PressureFeedbackState
 from .widgets import PressureFeedbackWidget
 
@@ -24,6 +22,8 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         # Optional objects used to simplify setup
         fixation_cross=None,
         acquisition=None,
+        # Optional goal markers (thin vertical ticks at ±half_width)
+        show_goal_markers: bool | float = False,
         # Optional real-time pressure text
         show_pressure_text: bool = False,
         left_pressure_label: str = "",
@@ -135,6 +135,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
             pressure_text_decimals=pressure_text_decimals,
             pressure_text_font_name=pressure_text_font_name,
         )
+        self.show_goal_markers = bool(show_goal_markers)
         self._reset_runtime_state()
 
     def _set_tachypy_context(self, screen, line_cls, text_cls) -> None:
@@ -196,9 +197,10 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         self._left_line = None
         self._right_line = None
         self._vertical_line = None
+        self._left_marker = None
+        self._right_marker = None
         self._left_text = None
         self._right_text = None
-
     def update(self, state: PressureFeedbackState) -> None:
         """Update the widget from a pressure feedback state.
 
@@ -235,6 +237,11 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         top_y = center_y + self.half_height
         bottom_y = center_y - self.half_height
 
+        if self.show_goal_markers:
+            marker_h = self.thickness / 2
+            self._draw_line("_left_marker", (center_x - self.half_width - 1, center_y - marker_h), (center_x - self.half_width - 1, center_y + marker_h), self.target_color, thickness=2)
+            self._draw_line("_right_marker", (center_x + self.half_width + 1, center_y - marker_h), (center_x + self.half_width + 1, center_y + marker_h), self.target_color, thickness=2)
+
         if self.left_scale > 0.0:
             self._draw_line("_left_line", (left_x, center_y), (center_x, center_y), self.color)
         if self.right_scale > 0.0:
@@ -255,21 +262,17 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         height = getattr(self.screen, "height", getattr(self.screen, "h", 0))
         return width / 2, height / 2
 
-    def _draw_line(self, attr_name: str, start, end, color) -> None:
+    def _draw_line(self, attr_name: str, start, end, color, thickness: float | None = None) -> None:
+        t = self.thickness if thickness is None else thickness
         line = getattr(self, attr_name)
         if line is None:
-            line = self._line_cls(
-                start_point=start,
-                end_point=end,
-                thickness=self.thickness,
-                color=color,
-            )
+            line = self._line_cls(start_point=start, end_point=end, thickness=t, color=color)
             setattr(self, attr_name, line)
         else:
             line.set_start_point(start)
             line.set_end_point(end)
             line.set_color(color)
-            line.set_thickness(self.thickness)
+            line.set_thickness(t)
         line.draw()
 
     def _draw_pressure_text(self, center_x: float, top_y: float) -> None:
@@ -315,14 +318,19 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         prefix = f"{label}: " if label else ""
         return f"{prefix}{pressure:.{self.pressure_text_decimals}f}"
 
+    def _screen_min(self) -> float:
+        width = float(getattr(self.screen, "width", getattr(self.screen, "w", 1024)))
+        height = float(getattr(self.screen, "height", getattr(self.screen, "h", 768)))
+        return min(width, height)
+
     def _auto_text_font_size(self) -> int:
-        return max(10, int(round(min(self.half_width, self.half_height) * 0.55)))
+        return max(12, int(round(self._screen_min() * 0.012)))
 
     def _auto_text_width(self) -> float:
-        return max(48.0, self.half_width * 2.5)
+        return max(48.0, self._screen_min() * 0.055)
 
     def _auto_text_height(self) -> float:
-        return max(18.0, self.pressure_text_font_size * 1.5)
+        return max(20.0, self.pressure_text_font_size * 1.5)
 
     @staticmethod
     def _lerp_color(start, end, progress: float):

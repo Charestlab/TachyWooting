@@ -24,6 +24,7 @@ IMPORTANT NOTE ABOUT "CLEARING" BUFFERS:
 
 from __future__ import annotations
 
+import logging
 import os
 import glob
 import time
@@ -42,8 +43,7 @@ import numpy as np
 from wooting_package.interface import MISSING_INTERFACE_MESSAGE, lib, ffi
 from wooting_package.feedback import PressureFeedbackConfig, PressureFeedbackState
 
-
-_UNSET = object()
+_log = logging.getLogger(__name__)
 
 
 def _require_native_interface() -> None:
@@ -213,7 +213,7 @@ def convert_char_to_keycode(input_values) -> list | None:
                     converted[i] = int(keycodes[k_i])
                     break
             else:
-                print("Problem, not finding the input value in the key codes list.")
+                _log.warning("convert_char_to_keycode: no match for %r in key names", val)
                 return None
 
         elif isinstance(val, int):
@@ -222,10 +222,10 @@ def convert_char_to_keycode(input_values) -> list | None:
                     converted[i] = str(key_names[k_i])
                     break
             else:
-                print("Problem, not finding the input value in the key codes list.")
+                _log.warning("convert_char_to_keycode: no match for keycode %r", val)
                 return None
         else:
-            print("Please use input_values of type char/string or integer")
+            _log.warning("convert_char_to_keycode: unsupported type %s (expected str or int)", type(val).__name__)
             return None
 
     return converted
@@ -823,8 +823,12 @@ class WOOTING_ACQUISITION:
             raise ValueError("int_analog must be 1 (int) or 2 (analog)")
         self.int_analog = int_analog
         self.logging_enabled = True
-
         _ACTIVE_LOGGERS.add(self)
+        _log.info(
+            "HDF5 logging configured: output=%s, mode=%s",
+            self.output_paths["hdf5"],
+            "analog" if int_analog == 2 else "integer",
+        )
 
     def _write_hdf5_trial_shard(self, hier: Dict[str, Dict[str, Dict[str, Sequence[float]]]]) -> None:
         if not self.staging_dir:
@@ -883,20 +887,23 @@ class WOOTING_ACQUISITION:
         buffer = ffi.new("WootingAnalog_DeviceInfo_FFI *[]", n)
         lib.wooting_analog_get_connected_devices_info(buffer, n)
 
+        d = buffer[0]
+        device_name = ffi.string(d.device_name).decode() if d.device_name else "Unknown"
+        _log.info("Wooting SDK initialized: %d device(s) found  [%s]", device_count, device_name)
+
         if verbose:
-            d = buffer[0]
             vendor = f"0x{d.vendor_id:04x}"
             product = f"0x{d.product_id:04x}"
             manufacturer = ffi.string(d.manufacturer_name).decode() if d.manufacturer_name else "Unknown"
-            device_name = ffi.string(d.device_name).decode() if d.device_name else "Unknown"
-            print(
-                f"\nDetected Wooting device:\n"
-                f"  - Vendor ID    : {vendor}\n"
-                f"  - Product ID   : {product}\n"
-                f"  - Device ID    : {d.device_id}\n"
-                f"  - Device Type  : {d.device_type}\n"
-                f"  - Manufacturer : {manufacturer}\n"
-                f"  - Device Name  : {device_name}\n"
+            _log.info(
+                "Device details:\n"
+                "  Vendor ID    : %s\n"
+                "  Product ID   : %s\n"
+                "  Device ID    : %s\n"
+                "  Device Type  : %s\n"
+                "  Manufacturer : %s\n"
+                "  Device Name  : %s",
+                vendor, product, d.device_id, d.device_type, manufacturer, device_name,
             )
         self.initialized = True
         return True
@@ -917,11 +924,32 @@ class WOOTING_ACQUISITION:
                 try:
                     logger._combine_trials()
                 except Exception:
-                    pass
+                    _log.warning("Failed to merge trial data for a logger", exc_info=True)
             _ACTIVE_LOGGERS.clear()
 
             # merge for this instance too (safe)
             self._combine_trials()
+
+    def is_connected(self) -> bool:
+        """Return whether a Wooting device is connected and the SDK is active.
+
+        Lightweight check — does not reinitialize the SDK. Useful for
+        validating device presence at experiment startup.
+
+        Returns
+        -------
+        bool
+            ``True`` if :meth:`initialize_keyboard` succeeded and the SDK
+            still reports a connected device.
+        """
+        if not self.initialized:
+            return False
+        if lib is None or ffi is None:
+            return False
+        try:
+            return bool(lib.wooting_analog_is_initialised())
+        except Exception:
+            return False
 
     # ---------------- helpers ----------------
 
@@ -979,6 +1007,55 @@ class WOOTING_ACQUISITION:
                 raise RuntimeError(f"wooting_analog_read_analog error: {v}")
             out[int(c)] = v
         return out
+
+    def read_pressure(self, key: Union[str, int]) -> float:
+        """Return the current analog pressure of a single key (0.0–1.0).
+
+        Parameters
+        ----------
+        key : str or int
+            Key label (e.g. ``'C'``) or integer HID keycode.
+
+        Returns
+        -------
+        float
+            Current analog pressure in ``[0, 1]``. Returns ``0.0`` when the
+            key is not detected (not pressed or not connected).
+
+        Raises
+        ------
+        ValueError
+            If the keyboard is not initialized.
+        """
+        if not self.initialized:
+            raise ValueError('Keyboard must be initialized through "initialize_keyboard()".')
+        codes = self._to_keycodes([key])
+        return float(self._read_positions_for_targets(codes)[codes[0]])
+
+    def read_pressures(self, keys: Sequence[Union[str, int]]) -> Dict[str, float]:
+        """Return the current analog pressures of multiple keys.
+
+        Parameters
+        ----------
+        keys : sequence of str or int
+            Key labels or integer HID keycodes to read.
+
+        Returns
+        -------
+        dict[str, float]
+            Mapping of each key (as given, converted to string) to its current
+            analog pressure in ``[0, 1]``.
+
+        Raises
+        ------
+        ValueError
+            If the keyboard is not initialized.
+        """
+        if not self.initialized:
+            raise ValueError('Keyboard must be initialized through "initialize_keyboard()".')
+        codes = self._to_keycodes(list(keys))
+        pos = self._read_positions_for_targets(codes)
+        return {str(k): float(pos[codes[i]]) for i, k in enumerate(keys)}
 
     def _choose_backend(self, target_codes: Sequence[int]) -> str:
         if self.backend == "read_full_buffer":
@@ -1267,7 +1344,7 @@ class WOOTING_ACQUISITION:
                 if float(pos_map.get(quit_code, 0.0)) > 0.0:
                     quit_pressed = True
                     if verbose:
-                        print(f"[quit_key] Detected press on {quit_key!r}")
+                        _log.debug("[quit_key] Detected press on %r", quit_key)
 
             snapshot = [
                 {
@@ -1655,7 +1732,7 @@ class WOOTING_ACQUISITION:
             try:
                 key_labels = convert_char_to_keycode([int(c) for c in target_codes])
             except Exception:
-                key_labels = None
+                _log.debug("wait_keys_light_press: HID label lookup failed", exc_info=True)
 
             backend = self._choose_backend(target_codes)
             lbl = (
@@ -1663,9 +1740,9 @@ class WOOTING_ACQUISITION:
                 if key_labels
                 else ", ".join(str(c) for c in target_codes)
             )
-            print(
-                f"[wait_keys_light_press] targets={lbl} | quit={quit_code} "
-                f"| range=[{LOW:.2f}, {HIGH:.3f}] | hold={hold_seconds:.3f}s | backend={backend} | fs=1000Hz"
+            _log.debug(
+                "[wait_keys_light_press] targets=%s | quit=%s | range=[%.2f, %.3f] | hold=%.3fs | backend=%s | fs=1000Hz",
+                lbl, quit_code, LOW, HIGH, hold_seconds, backend,
             )
             last_print_t = time.perf_counter()
 
@@ -1675,7 +1752,7 @@ class WOOTING_ACQUISITION:
                 return
             nowp = time.perf_counter()
             if (nowp - last_print_t) >= PRINT_EVERY_S:
-                print(msg)
+                _log.debug(msg)
                 last_print_t = nowp
 
         while True:
@@ -1692,7 +1769,7 @@ class WOOTING_ACQUISITION:
                 qv = float(self._read_positions_for_targets([quit_code]).get(quit_code, 0.0))
                 if qv >= LOW:
                     if verbose:
-                        print("[wait_keys_light_press] quit key pressed → abort")
+                        _log.debug("[wait_keys_light_press] quit key pressed → abort")
                     return False
 
             all_in_range = True
@@ -1776,8 +1853,9 @@ class WOOTING_ACQUISITION:
         timeout_seconds: float | None = None,
         # ── appearance ──────────────────────────────────────────────────────
         background_color: tuple[int, int, int] = (128, 128, 128),
-        initial_color: tuple[int, int, int] | object = _UNSET,
-        show_pressure_text: bool | object = False,
+        initial_color: tuple[int, int, int] | None = None,
+        show_pressure_text: bool | None = None,
+        show_goal_markers: bool | None = None,
         # ── behaviour ───────────────────────────────────────────────────────
         exit_keys: Sequence[str] = ("escape", "esc", "enter", "return", "space", "q"),
         # ── others ──────────────────────────────────────────────────────────
@@ -1897,8 +1975,9 @@ class WOOTING_ACQUISITION:
                     ("fixation_cross", fixation_cross),
                     ("initial_color", initial_color),
                     ("show_pressure_text", show_pressure_text),
+                    ("show_goal_markers", show_goal_markers),
                 )
-                if value is not None and value is not _UNSET
+                if value is not None
             ]
             if conflicting_widget_args:
                 names = ", ".join(conflicting_widget_args)
@@ -1920,11 +1999,11 @@ class WOOTING_ACQUISITION:
                 screen=screen,
                 fixation_cross=fixation_cross,
                 background_color=background_color,
-                initial_color=(100, 100, 100) if initial_color is _UNSET else initial_color,
+                initial_color=(100, 100, 100) if initial_color is None else initial_color,
                 acquisition=self,
-                show_pressure_text=True if show_pressure_text is _UNSET else show_pressure_text,
+                show_pressure_text=False if show_pressure_text is None else show_pressure_text,
+                show_goal_markers=False if show_goal_markers is None else show_goal_markers,
             )
-
         state = PressureFeedbackState(
             PressureFeedbackConfig(
                 min_pressure_start=self.min_pressure_start,
@@ -1968,7 +2047,7 @@ class WOOTING_ACQUISITION:
 
             if state.is_ready:
                 if verbose:
-                    print("[wait_keys_light_press_visual] condition satisfied.")
+                    _log.debug("[wait_keys_light_press_visual] condition satisfied.")
                 return True
 
             next_t += interval
@@ -2083,7 +2162,7 @@ class WOOTING_ACQUISITION:
             try:
                 key_labels = convert_char_to_keycode([int(c) for c in target_codes])
             except Exception:
-                key_labels = None
+                _log.debug("wait_keys_released: HID label lookup failed", exc_info=True)
 
             backend = self._choose_backend(target_codes)
             lbl = (
@@ -2091,9 +2170,9 @@ class WOOTING_ACQUISITION:
                 if key_labels
                 else ", ".join(str(c) for c in target_codes)
             )
-            print(
-                f"[wait_keys_released] targets={lbl} | release<= {RELEASE_MAX:.3f} "
-                f"| hold={hold_seconds:.3f}s | backend={backend} | fs=1000Hz"
+            _log.debug(
+                "[wait_keys_released] targets=%s | release<=%.3f | hold=%.3fs | backend=%s | fs=1000Hz",
+                lbl, RELEASE_MAX, hold_seconds, backend,
             )
             last_print_t = time.perf_counter()
 
@@ -2103,7 +2182,7 @@ class WOOTING_ACQUISITION:
                 return
             nowp = time.perf_counter()
             if (nowp - last_print_t) >= PRINT_EVERY_S:
-                print(msg)
+                _log.debug(msg)
                 last_print_t = nowp
 
         while True:
@@ -2180,3 +2259,216 @@ class WOOTING_ACQUISITION:
                 next_t = now2 + interval
 
             self._wait_until_next_tick(next_t)
+
+
+# ============================================================
+# Offline data helpers (no keyboard required)
+# ============================================================
+
+def load_trial(hdf5_path: str, trial_id: Union[int, str]) -> Dict[str, Any]:
+    """Load a single trial from an HDF5 acquisition file.
+
+    Parameters
+    ----------
+    hdf5_path : str
+        Path to the HDF5 file produced by
+        :meth:`WOOTING_ACQUISITION.uninitialize_keyboard`.
+    trial_id : int or str
+        Trial number (1-based integer) or zero-padded string (e.g., ``"0001"``).
+
+    Returns
+    -------
+    dict
+        Mapping of keycode strings to time-series dicts, plus a special
+        ``"_attrs"`` key containing trial-level metadata::
+
+            {
+                "0006": {
+                    "position":          np.ndarray,  # (N,) float64
+                    "time_to_threshold": np.ndarray,  # (N,) float64
+                    "time_abs":          np.ndarray,  # (N,) float64
+                },
+                "_attrs": {"threshold": 0.8, "backend": "read_full_buffer", ...},
+            }
+
+    Raises
+    ------
+    KeyError
+        If the trial is not found in the file.
+    FileNotFoundError
+        If ``hdf5_path`` does not exist.
+
+    Examples
+    --------
+    >>> trial = load_trial("session.hdf5", 1)
+    >>> trial["0006"]["position"]
+    array([0.0, 0.01, ...])
+    >>> trial["_attrs"]["threshold"]
+    0.8
+    """
+    trial_key = f"{int(trial_id):04d}" if not isinstance(trial_id, str) else trial_id
+
+    with h5py.File(hdf5_path, "r") as f:
+        if "trials" not in f:
+            raise KeyError(f"No 'trials' group in {hdf5_path!r}")
+        if trial_key not in f["trials"]:
+            available = sorted(f["trials"].keys())
+            raise KeyError(f"Trial {trial_key!r} not found. Available trials: {available}")
+
+        g_trial = f["trials"][trial_key]
+        attrs: Dict[str, Any] = {}
+        for k, v in g_trial.attrs.items():
+            attrs[k] = v.decode() if isinstance(v, (bytes, np.bytes_)) else v
+
+        result: Dict[str, Any] = {}
+        g_keys = g_trial.get("keys")
+        if g_keys is not None:
+            for key_name, g_key in g_keys.items():
+                if "values" not in g_key:
+                    continue
+                data = g_key["values"][()]  # (N, 3): position, time_to_threshold, time_abs
+                result[key_name] = {
+                    "position": data[:, 0],
+                    "time_to_threshold": data[:, 1],
+                    "time_abs": data[:, 2],
+                }
+
+        result["_attrs"] = attrs
+        return result
+
+
+def trial_to_dataframe(trial_data: Dict[str, Any]) -> "Any":
+    """Convert a trial dict from :func:`load_trial` to a long-format pandas DataFrame.
+
+    Parameters
+    ----------
+    trial_data : dict
+        Output of :func:`load_trial`. The ``"_attrs"`` key is ignored.
+
+    Returns
+    -------
+    pd.DataFrame
+        Long-format frame with columns ``key``, ``position``,
+        ``time_to_threshold``, and ``time_abs``. One row per sample per key.
+
+    Raises
+    ------
+    ImportError
+        If pandas is not installed.
+
+    Examples
+    --------
+    >>> trial = load_trial("session.hdf5", 1)
+    >>> df = trial_to_dataframe(trial)
+    >>> df.head()
+       key  position  time_to_threshold    time_abs
+    0  0006      0.00          -0.200        ...
+    """
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise ImportError("pandas is required for trial_to_dataframe: pip install pandas") from exc
+
+    frames = []
+    for key_name, series in trial_data.items():
+        if key_name == "_attrs" or not isinstance(series, dict):
+            continue
+        df = pd.DataFrame({
+            "position": series["position"],
+            "time_to_threshold": series["time_to_threshold"],
+            "time_abs": series["time_abs"],
+        })
+        df.insert(0, "key", key_name)
+        frames.append(df)
+
+    if not frames:
+        return pd.DataFrame(columns=["key", "position", "time_to_threshold", "time_abs"])
+    return pd.concat(frames, ignore_index=True)
+
+
+def load_session(hdf5_path: str, include_attrs: bool = True) -> "Any":
+    """Load all trials from an HDF5 acquisition file into a single long-format DataFrame.
+
+    Iterates over every trial in the file and stacks them into one pandas
+    DataFrame. Each row is one sample (one timestamp) for one key in one trial.
+
+    Parameters
+    ----------
+    hdf5_path : str
+        Path to the HDF5 file produced by
+        :meth:`WOOTING_ACQUISITION.uninitialize_keyboard`.
+    include_attrs : bool, default=True
+        When ``True``, trial-level metadata (threshold, backend, etc.) is added
+        as repeated columns on every row of that trial — convenient for
+        ``groupby`` and filtering without a separate merge.
+
+    Returns
+    -------
+    pd.DataFrame
+        Long-format frame with columns:
+
+        - ``trial`` (int) — trial number
+        - ``key`` (str) — zero-padded keycode, e.g. ``"0006"``
+        - ``position`` (float) — analog pressure in ``[0, 1]``
+        - ``time_to_threshold`` (float) — seconds since ``trial_start_ns``
+        - ``time_abs`` (float) — seconds since Unix epoch
+
+        When ``include_attrs=True``, additional columns from each trial's HDF5
+        attributes are appended (``threshold``, ``backend``, ``threshold_time``,
+        ``threshold_key``, ``trial_start_perf_ns``, …).
+
+    Raises
+    ------
+    KeyError
+        If the file contains no ``trials`` group.
+    ImportError
+        If pandas is not installed.
+
+    Examples
+    --------
+    >>> df = load_session("session.hdf5")
+    >>> df.groupby("trial")["position"].max()
+    >>> df[df["key"] == "0006"].plot(x="time_to_threshold", y="position")
+    """
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise ImportError("pandas is required for load_session: pip install pandas") from exc
+
+    with h5py.File(hdf5_path, "r") as f:
+        if "trials" not in f:
+            raise KeyError(f"No 'trials' group in {hdf5_path!r}")
+
+        frames = []
+        for trial_name in sorted(f["trials"].keys()):
+            g_trial = f["trials"][trial_name]
+            trial_num = int(trial_name)
+
+            attrs: Dict[str, Any] = {}
+            if include_attrs:
+                for k, v in g_trial.attrs.items():
+                    attrs[k] = v.decode() if isinstance(v, (bytes, np.bytes_)) else v
+
+            g_keys = g_trial.get("keys")
+            if g_keys is None:
+                continue
+
+            for key_name, g_key in g_keys.items():
+                if "values" not in g_key:
+                    continue
+                data = g_key["values"][()]  # (N, 3): position, time_to_threshold, time_abs
+                df = pd.DataFrame({
+                    "position": data[:, 0],
+                    "time_to_threshold": data[:, 1],
+                    "time_abs": data[:, 2],
+                })
+                df.insert(0, "key", key_name)
+                df.insert(0, "trial", trial_num)
+                if include_attrs:
+                    for attr_k, attr_v in attrs.items():
+                        df[attr_k] = attr_v
+                frames.append(df)
+
+    if not frames:
+        return pd.DataFrame(columns=["trial", "key", "position", "time_to_threshold", "time_abs"])
+    return pd.concat(frames, ignore_index=True)

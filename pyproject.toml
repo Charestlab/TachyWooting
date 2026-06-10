@@ -42,7 +42,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tachypy = [
-    "tachypy>=0.1.14",
+    "tachypy==0.1.14",
 ]
 dev = [
     "black>=23.0.0",
