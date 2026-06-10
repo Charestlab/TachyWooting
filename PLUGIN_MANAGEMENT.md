@@ -55,7 +55,7 @@ This command runs:
 
 **Python API:**
 ```python
-from wooting_package.package_setup import install_plugins
+from tachywooting.package_setup import install_plugins
 install_plugins()
 ```
 
@@ -67,7 +67,7 @@ No dedicated CLI command is exposed for plugin-only uninstall.
 
 **Python API:**
 ```python
-from wooting_package.package_setup import uninstall_plugins
+from tachywooting.package_setup import uninstall_plugins
 uninstall_plugins()
 ```
 
@@ -89,7 +89,7 @@ This removes:
 
 **Python API:**
 ```python
-from wooting_package.package_setup import delete_interface
+from tachywooting.package_setup import delete_interface
 delete_interface(cleanup_plugins=True)
 ```
 
@@ -104,7 +104,7 @@ wooting-delete-interface
 
 **Python API:**
 ```python
-from wooting_package.package_setup import delete_interface
+from tachywooting.package_setup import delete_interface
 delete_interface()  # or delete_interface(cleanup_plugins=False)
 ```
 
@@ -138,7 +138,7 @@ wooting-demo
 Or programmatically:
 
 ```python
-from wooting_package.interface import lib
+from tachywooting.interface import lib
 
 # Initialize the SDK
 result = lib.wooting_analog_initialise()
@@ -243,7 +243,7 @@ wooting-build-interface
 For special use cases, you can inspect where plugins are loaded from:
 
 ```python
-from wooting_package.interface import lib
+from tachywooting.interface import lib
 import os
 
 # SDK will look for plugins in:

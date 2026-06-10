@@ -44,7 +44,7 @@ jobs:
           fi
 
       - name: Confirm package is registered
-        run: pip show wooting-analog
+        run: pip show tachywooting
 
       - name: List installed extras
         shell: bash

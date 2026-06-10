@@ -7,7 +7,7 @@ This package installs the following command-line scripts.
 Entry point:
 
 ```toml
-wooting-demo = "wooting_package.demos.cli:main"
+wooting-demo = "tachywooting.demos.cli:main"
 ```
 
 Runs a terminal demo for reading analog pressure from a selected key.
@@ -25,7 +25,7 @@ Use this to quickly verify that the keyboard, native interface, and pressure rea
 Entry point:
 
 ```toml
-wooting-build-interface = "wooting_package.post_install:run_post_install"
+wooting-build-interface = "tachywooting.post_install:run_post_install"
 ```
 
 Runs post-install setup:
@@ -47,7 +47,7 @@ Use this after installation if importing the package reports that the native int
 Entry point:
 
 ```toml
-wooting-delete-interface = "wooting_package.wooting_utils:delete_interface"
+wooting-delete-interface = "tachywooting.wooting_utils:delete_interface"
 ```
 
 Deletes generated CFFI interface artifacts and common cache files.
@@ -66,7 +66,7 @@ Use this when you want to force a clean rebuild of the native interface.
 Entry point:
 
 ```toml
-wooting-visual-fixation-demo = "wooting_package.demos.visual_fixation_demo:main"
+wooting-visual-fixation-demo = "tachywooting.demos.visual_fixation_demo:main"
 ```
 
 Runs the TachyPy visual readiness demo with the interactive fixation cross.
@@ -108,7 +108,7 @@ wooting-visual-fixation-demo \
 Entry point:
 
 ```toml
-wooting-mini-bw-experiment = "wooting_package.demos.mini_bw_experiment:main"
+wooting-mini-bw-experiment = "tachywooting.demos.mini_bw_experiment:main"
 ```
 
 Runs a no-file TachyPy mini-experiment for testing response trials and finger-removal tracking.

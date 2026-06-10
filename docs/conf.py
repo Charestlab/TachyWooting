@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-project = "Wooting Analog"
+project = "TachyWooting"
 author = "Mathias Salvas-Hébert, Guillaume Lalonde-Beaudoin"
 copyright = "2026, Mathias Salvas-Hébert, Guillaume Lalonde-Beaudoin"
 

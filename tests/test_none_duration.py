@@ -4,7 +4,7 @@ Test script for acquire_analog_values with duration_before_threshold=None
 Press 'C' key to trigger acquisition
 """
 import time
-from wooting_package.wooting_utils import WOOTING_ACQUISITION
+from tachywooting.wooting_utils import WOOTING_ACQUISITION
 
 def main():
     print("\n" + "="*60)

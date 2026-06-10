@@ -2,9 +2,9 @@ import pytest
 import sys
 import types
 
-from wooting_package.feedback import PressureFeedbackConfig, PressureFeedbackState, PressureScaleMapper
-from wooting_package.feedback.tachypy_widget import TachyPyInteractiveFixationCross
-from wooting_package.wooting_utils import WOOTING_ACQUISITION
+from tachywooting.feedback import PressureFeedbackConfig, PressureFeedbackState, PressureScaleMapper
+from tachywooting.feedback.tachypy_widget import TachyPyInteractiveFixationCross
+from tachywooting.wooting_utils import WOOTING_ACQUISITION
 
 
 def test_pressure_scale_mapper():

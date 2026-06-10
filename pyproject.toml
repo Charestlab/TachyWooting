@@ -3,12 +3,12 @@ requires = ["setuptools>=77.0", "wheel", "cffi>=1.15.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wooting-analog"
+name = "tachywooting"
 version = "0.1.0"
 description = "Python interface for Wooting analog keyboards"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 authors = [
     {name = "Mathias Salvas-Hébert"},
@@ -55,29 +55,29 @@ dev = [
     "sphinx>=7.0.0",
     "sphinx-rtd-theme>=2.0.0",
     "twine>=5.0.0",
-    "wooting-analog[tachypy]",
+    "tachywooting[tachypy]",
 ]
 all = [
-    "wooting-analog[tachypy,dev]",
+    "tachywooting[tachypy,dev]",
 ]
 
 [tool.setuptools.packages.find]
-include = ["wooting_package*"]
+include = ["tachywooting*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-wooting_package = [
+tachywooting = [
     "libraries/**/*",
     "permissions/**/*",
 ]
 
 [project.scripts]
-wooting-demo = "wooting_package.demos.cli:main"
-wooting-build-interface = "wooting_package.package_setup:run_post_install"
-wooting-delete-interface = "wooting_package.package_setup:main_delete_interface"
-wooting-visual-fixation-demo = "wooting_package.demos.visual_fixation_demo:main"
-wooting-mini-bw-experiment = "wooting_package.demos.mini_bw_experiment:main"
-wooting-visualize = "wooting_package.visualize:main"
+wooting-demo = "tachywooting.demos.cli:main"
+wooting-build-interface = "tachywooting.package_setup:run_post_install"
+wooting-delete-interface = "tachywooting.package_setup:main_delete_interface"
+wooting-visual-fixation-demo = "tachywooting.demos.visual_fixation_demo:main"
+wooting-mini-bw-experiment = "tachywooting.demos.mini_bw_experiment:main"
+wooting-visualize = "tachywooting.visualize:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

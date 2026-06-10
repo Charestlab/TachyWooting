@@ -1,6 +1,6 @@
 # Development Guide
 
-This document is a maintainer guide for the `wooting-analog` project.
+This document is a maintainer guide for the `tachywooting` project.
 
 ## 1) Development Setup
 
@@ -26,7 +26,7 @@ python -m pip install -e ".[tachypy]"
 ## 2) `update-wooting-sdk` Workflow
 
 The GitHub Actions workflow `update-wooting-sdk` updates vendored SDK assets under
-`wooting_package/libraries` from an official Wooting SDK release.
+`tachywooting/libraries` from an official Wooting SDK release.
 
 Workflow file: `.github/workflows/update-wooting-sdk.yml`
 Script used: `scripts/update_wooting_sdk.py`
@@ -40,7 +40,7 @@ Script used: `scripts/update_wooting_sdk.py`
 python scripts/update_wooting_sdk.py --version "<version>"
 ```
 
-3. Checks whether `wooting_package/libraries` changed.
+3. Checks whether `tachywooting/libraries` changed.
 4. If changed:
 - creates branch `update-wooting-sdk-<version>`
 - commits changes
@@ -58,15 +58,15 @@ The script:
 - downloads GitHub release assets for macOS arm64/x86_64, Linux, and Windows
 - verifies SHA256 (release metadata or `KNOWN_SHA256` fallback)
 - extracts archives and replaces target platform directories
-- updates `wooting_package/libraries/VERSION.json`
+- updates `tachywooting/libraries/VERSION.json`
 - adjusts macOS install names for dylibs when needed
 
 ### SDK update best practices
 
-- Always inspect `git diff wooting_package/libraries` before commit.
+- Always inspect `git diff tachywooting/libraries` before commit.
 - Ensure required Linux artifacts still exist in:
-- `wooting_package/libraries/linux/release`
-- `wooting_package/libraries/linux/debug`
+- `tachywooting/libraries/linux/release`
+- `tachywooting/libraries/linux/debug`
 - Do not remove binaries required by the CFFI build.
 
 ## 3) Running workflows locally with `act`
@@ -134,7 +134,7 @@ pytest tests/ -v --tb=short
 
 ```bash
 python -m pip install .
-python -m pip show wooting-analog
+python -m pip show tachywooting
 ```
 
 ### Clean CFFI rebuild (if needed)
@@ -147,8 +147,8 @@ wooting-build-interface
 ## 6) Important Project Files
 
 - `pyproject.toml`: package metadata, dependencies, scripts
-- `wooting_package/wooting_interface_builder.py`: CFFI build and native linking
-- `wooting_package/package_setup.py`: post-install orchestration (permissions/plugins)
+- `tachywooting/wooting_interface_builder.py`: CFFI build and native linking
+- `tachywooting/package_setup.py`: post-install orchestration (permissions/plugins)
 - `scripts/update_wooting_sdk.py`: vendored SDK updater
 - `.github/workflows/test-install.yml`: install/test matrix CI
 - `.github/workflows/update-wooting-sdk.yml`: automated SDK update workflow

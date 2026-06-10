@@ -2,7 +2,7 @@
 """
 Test threshold metadata logging with multiple keys
 """
-from wooting_package.wooting_utils import WOOTING_ACQUISITION
+from tachywooting.wooting_utils import WOOTING_ACQUISITION
 import h5py
 
 def main():
@@ -59,7 +59,7 @@ def main():
             
             # Convert keycode to key name
             if isinstance(threshold_key, (int, float)):
-                from wooting_package.wooting_utils import convert_char_to_keycode
+                from tachywooting.wooting_utils import convert_char_to_keycode
                 key_name = convert_char_to_keycode([int(threshold_key)])
                 if key_name:
                     print(f" ({key_name[0]})")

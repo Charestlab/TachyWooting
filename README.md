@@ -1,4 +1,8 @@
-# Wooting Analog
+# TachyWooting
+
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
+[![Python versions](https://img.shields.io/pypi/pyversions/tachywooting)](https://pypi.org/project/tachywooting/)
+[![Tests](https://github.com/mathiassalvas/wooting-analog/actions/workflows/CI.yml/badge.svg)](https://github.com/mathiassalvas/wooting-analog/actions/workflows/CI.yml)
 
 Python bindings and acquisition utilities for Wooting analog keyboards.
 
@@ -12,6 +16,7 @@ Console scripts are documented in [docs/scripts.md](docs/scripts.md).
 - [documentation.md](documentation.md): technical details and architecture notes
 - [development.md](development.md): maintainer workflow and SDK update process
 - [PLUGIN_MANAGEMENT.md](PLUGIN_MANAGEMENT.md): plugin installation and troubleshooting
+- [raw_sdk.md](raw_sdk.md): direct `lib`/`ffi` SDK reference for advanced use
 
 - **Analog Key Acquisition**: Read key positions (0.0–1.0) with microsecond-level timing
 - **Threshold-Based Triggering**: Automatically capture key press trajectories around actuation threshold
@@ -72,7 +77,7 @@ python -m pip install -e ".[tachypy]"
 ## Quick Start
 
 ```python
-from wooting_package import WOOTING_ACQUISITION
+from tachywooting import WOOTING_ACQUISITION
 
 acq = WOOTING_ACQUISITION(threshold=0.8)
 acq.initialize_keyboard(verbose=True)
@@ -119,14 +124,17 @@ position, time_to_threshold, time_abs
 ## Visualize Logs
 
 ```bash
-python -m wooting_package.visualize logs/tracking.hdf5 --list
-python -m wooting_package.visualize logs/tracking.hdf5 --trial 1 --key 4
+python -m tachywooting.visualize logs/tracking.hdf5 --list
+python -m tachywooting.visualize logs/tracking.hdf5 --trial 1 --key 4
 ```
 
 ## Public API
 
 - `WOOTING_ACQUISITION`: acquisition, threshold detection, readiness checks, and logging.
 - `convert_char_to_keycode`: convert between key labels and HID keycodes.
+- `load_trial`: load a single trial from an HDF5 log file.
+- `load_session`: load all trials from an HDF5 log file.
+- `trial_to_dataframe`: convert a trial dict to a pandas DataFrame.
 - `build_interface`: rebuild the CFFI interface.
 - `delete_interface`: remove generated CFFI artifacts.
 - `lib` and `ffi`: raw CFFI handles for advanced SDK access.

@@ -6,7 +6,7 @@ Keyboard initialization
 
 .. code-block:: python
 
-   from wooting_package import WOOTING_ACQUISITION
+   from tachywooting import WOOTING_ACQUISITION
 
    acq = WOOTING_ACQUISITION(
        threshold=0.8,

@@ -4,7 +4,7 @@ API Reference
 Public Package API
 ------------------
 
-.. automodule:: wooting_package
+.. automodule:: tachywooting
    :members:
    :undoc-members:
    :show-inheritance:
@@ -12,7 +12,7 @@ Public Package API
 Acquisition
 -----------
 
-.. autoclass:: wooting_package.WOOTING_ACQUISITION
+.. autoclass:: tachywooting.WOOTING_ACQUISITION
    :members:
    :undoc-members:
    :show-inheritance:
@@ -20,7 +20,7 @@ Acquisition
 Feedback Logic
 --------------
 
-.. automodule:: wooting_package.feedback
+.. automodule:: tachywooting.feedback
    :members:
    :undoc-members:
    :show-inheritance:
@@ -28,7 +28,7 @@ Feedback Logic
 TachyPy Widget
 --------------
 
-.. automodule:: wooting_package.feedback.tachypy_widget
+.. automodule:: tachywooting.feedback.tachypy_widget
    :members:
    :undoc-members:
    :show-inheritance:
@@ -36,5 +36,5 @@ TachyPy Widget
 Utilities
 ---------
 
-.. autofunction:: wooting_package.convert_char_to_keycode
-.. autofunction:: wooting_package.delete_interface
+.. autofunction:: tachywooting.convert_char_to_keycode
+.. autofunction:: tachywooting.delete_interface

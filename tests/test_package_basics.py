@@ -3,14 +3,14 @@ import os
 import re
 import sys
 
-import wooting_package
-from wooting_package import WOOTING_ACQUISITION, convert_char_to_keycode, package_setup
-from wooting_package import wooting_interface_builder
+import tachywooting
+from tachywooting import WOOTING_ACQUISITION, convert_char_to_keycode, package_setup
+from tachywooting import wooting_interface_builder
 
 
 def test_import_does_not_require_built_native_interface():
-    assert hasattr(wooting_package, "build_interface")
-    assert hasattr(wooting_package, "delete_interface")
+    assert hasattr(tachywooting, "build_interface")
+    assert hasattr(tachywooting, "delete_interface")
 
 
 def test_convert_char_to_keycode_round_trip():
@@ -19,7 +19,7 @@ def test_convert_char_to_keycode_round_trip():
 
 
 def test_acquisition_requires_native_interface_when_missing():
-    if wooting_package.ffi is not None and wooting_package.lib is not None:
+    if tachywooting.ffi is not None and tachywooting.lib is not None:
         pytest.skip("native interface is already built in this environment")
 
     with pytest.raises(RuntimeError, match="wooting-build-interface"):
@@ -30,12 +30,12 @@ def test_interface_console_scripts_target_package_setup():
     pyproject_text = open("pyproject.toml", encoding="utf-8").read()
 
     assert re.search(
-        r'^wooting-build-interface\s*=\s*"wooting_package\.package_setup:run_post_install"$',
+        r'^wooting-build-interface\s*=\s*"tachywooting\.package_setup:run_post_install"$',
         pyproject_text,
         re.MULTILINE,
     )
     assert re.search(
-        r'^wooting-delete-interface\s*=\s*"wooting_package\.package_setup:main_delete_interface"$',
+        r'^wooting-delete-interface\s*=\s*"tachywooting\.package_setup:main_delete_interface"$',
         pyproject_text,
         re.MULTILINE,
     )

@@ -2,7 +2,7 @@
 
 This is a maintainer tool. It downloads official Wooting release assets,
 verifies SHA256 digests from GitHub release metadata when available, extracts
-the archives, and copies the SDK files into ``wooting_package/libraries``.
+the archives, and copies the SDK files into ``tachywooting/libraries``.
 
 It is intentionally not used at package install time.
 """
@@ -24,7 +24,7 @@ from pathlib import Path
 
 
 REPO = "WootingKb/wooting-analog-sdk"
-TARGET_ROOT = Path("wooting_package/libraries")
+TARGET_ROOT = Path("tachywooting/libraries")
 
 
 @dataclass(frozen=True)

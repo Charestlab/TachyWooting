@@ -2,7 +2,7 @@
 
 ## Overview
 
-`wooting-analog` provides a Python interface for the Wooting Analog SDK. It exposes high-level acquisition helpers for analog keyboard experiments while keeping the raw CFFI `lib` and `ffi` handles available for advanced SDK access.
+`tachywooting` provides a Python interface for the Wooting Analog SDK. It exposes high-level acquisition helpers for analog keyboard experiments while keeping the raw CFFI `lib` and `ffi` handles available for advanced SDK access.
 
 ## Installation Behavior
 
@@ -38,7 +38,7 @@ wooting-keyboard/
 ├── setup.py
 ├── requirements.txt
 ├── tests/
-└── wooting_package/
+└── tachywooting/
     ├── __init__.py
     ├── cli.py
     ├── post_install.py
@@ -63,10 +63,10 @@ wooting-keyboard/
 The package builds a CFFI extension named:
 
 ```text
-wooting_package.interface.wooting_interface
+tachywooting.interface.wooting_interface
 ```
 
-`wooting_package.interface.__init__` imports this generated module and exposes:
+`tachywooting.interface.__init__` imports this generated module and exposes:
 
 - `lib`: Wooting Analog SDK functions.
 - `ffi`: CFFI helper object for buffers, structs, and C strings.
@@ -140,7 +140,7 @@ Examples:
 `convert_char_to_keycode()` converts key labels to HID keycodes and keycodes back to labels.
 
 ```python
-from wooting_package import convert_char_to_keycode
+from tachywooting import convert_char_to_keycode
 
 codes = convert_char_to_keycode(["A", "Esc", "Space"])
 labels = convert_char_to_keycode([4, 41, 44])
@@ -153,7 +153,7 @@ labels = convert_char_to_keycode([4, 41, 44])
 Main acquisition class for initialization, threshold detection, readiness checks, and logging.
 
 ```python
-from wooting_package import WOOTING_ACQUISITION
+from tachywooting import WOOTING_ACQUISITION
 
 acq = WOOTING_ACQUISITION(threshold=0.8)
 acq.initialize_keyboard(verbose=True)
@@ -180,7 +180,7 @@ Acquires analog values in the `0.0` to `1.0` range around a threshold crossing.
 Acquires analog values and converts pressure to integer values in the `0` to `255` range.
 
 ```python
-from wooting_package import WOOTING_ACQUISITION
+from tachywooting import WOOTING_ACQUISITION
 
 acq = WOOTING_ACQUISITION()
 acq.initialize_keyboard()
@@ -200,7 +200,7 @@ Enables HDF5 logging.
 - `int_analog=2`: log analog float pressure values.
 
 ```python
-from wooting_package import WOOTING_ACQUISITION
+from tachywooting import WOOTING_ACQUISITION
 
 acq = WOOTING_ACQUISITION()
 acq.initialize_keyboard()
@@ -218,7 +218,7 @@ Finger removal tracking is built into `WOOTING_ACQUISITION`. By default, it dete
 A trial is flagged if any monitored key falls below `finger_present_threshold` during pre-threshold acquisition. Set `count_post_threshold_removals=True` to also include post-threshold drops in the removal counters.
 
 ```python
-from wooting_package import WOOTING_ACQUISITION
+from tachywooting import WOOTING_ACQUISITION
 
 tracker = WOOTING_ACQUISITION(
     threshold=0.8,
@@ -269,7 +269,7 @@ Pressure feedback is split into pure logic and optional rendering.
 Pure feedback classes:
 
 ```python
-from wooting_package.feedback import PressureFeedbackConfig, PressureFeedbackState
+from tachywooting.feedback import PressureFeedbackConfig, PressureFeedbackState
 
 state = PressureFeedbackState(
     PressureFeedbackConfig(
@@ -303,7 +303,7 @@ acq.wait_keys_light_press_visual(
 Advanced custom widget:
 
 ```python
-from wooting_package.feedback.tachypy_widget import TachyPyInteractiveFixationCross
+from tachywooting.feedback.tachypy_widget import TachyPyInteractiveFixationCross
 
 widget = TachyPyInteractiveFixationCross(screen=screen, acquisition=acq)
 acq.wait_keys_light_press_visual(
@@ -364,8 +364,8 @@ Trial attributes may include:
 The visualizer can list trials and plot key trajectories.
 
 ```bash
-python -m wooting_package.visualize logs/tracking.hdf5 --list
-python -m wooting_package.visualize logs/tracking.hdf5 --trial 1 --key 4
+python -m tachywooting.visualize logs/tracking.hdf5 --list
+python -m tachywooting.visualize logs/tracking.hdf5 --trial 1 --key 4
 ```
 
 It plots position against `time_to_threshold` and shows `time_abs` on a secondary x-axis.
@@ -400,6 +400,6 @@ Removes generated CFFI artifacts and selected cache files.
 ## Development Checks
 
 ```bash
-python -m compileall -q wooting_package tests
+python -m compileall -q tachywooting tests
 python -m build --sdist --wheel --no-isolation
 ```

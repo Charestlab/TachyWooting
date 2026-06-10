@@ -10,7 +10,7 @@ Entry point:
 
 .. code-block:: toml
 
-   wooting-demo = "wooting_package.demos.cli:main"
+   wooting-demo = "tachywooting.demos.cli:main"
 
 Runs a terminal demo for reading analog pressure from a selected key.
 
@@ -30,7 +30,7 @@ Entry point:
 
 .. code-block:: toml
 
-   wooting-build-interface = "wooting_package.post_install:run_post_install"
+   wooting-build-interface = "tachywooting.post_install:run_post_install"
 
 Runs post-install setup:
 
@@ -54,7 +54,7 @@ Entry point:
 
 .. code-block:: toml
 
-   wooting-delete-interface = "wooting_package.wooting_utils:delete_interface"
+   wooting-delete-interface = "tachywooting.wooting_utils:delete_interface"
 
 Deletes generated CFFI interface artifacts and common cache files.
 
@@ -74,7 +74,7 @@ Entry point:
 
 .. code-block:: toml
 
-   wooting-visual-fixation-demo = "wooting_package.demos.visual_fixation_demo:main"
+   wooting-visual-fixation-demo = "tachywooting.demos.visual_fixation_demo:main"
 
 Runs the TachyPy visual readiness demo with the interactive fixation cross.
 
@@ -117,7 +117,7 @@ Entry point:
 
 .. code-block:: toml
 
-   wooting-mini-bw-experiment = "wooting_package.demos.mini_bw_experiment:main"
+   wooting-mini-bw-experiment = "tachywooting.demos.mini_bw_experiment:main"
 
 Runs a no-file TachyPy mini-experiment for testing response trials and
 finger-removal tracking.
