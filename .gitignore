@@ -86,3 +86,4 @@ wooting_package/interface/*
 *.npy
 *.npz
 plot.png
+act-install.log
