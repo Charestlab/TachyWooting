@@ -32,6 +32,10 @@ _build/
 *.so
 *.pyd
 
+# Keep vendored Linux SDK binaries tracked for packaging/CI builds
+!wooting_package/libraries/linux/release/*.so
+!wooting_package/libraries/linux/debug/*.so
+
 # Python package/build artifacts
 build/
 dist/
