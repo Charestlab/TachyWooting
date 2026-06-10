@@ -12,3 +12,7 @@ finger-removal tracking, logging, and optional TachyPy visual feedback.
    usage
    console_scripts
    api
+   readme
+   documentation
+   development
+   plugin_management

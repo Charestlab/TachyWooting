@@ -42,14 +42,20 @@ No manual intervention required for most users!
 
 If you need to manually install or reinstall plugins:
 
-**CLI:**
+**CLI (full post-install setup):**
 ```bash
-wooting-install-plugins
+wooting-build-interface
 ```
+
+This command runs:
+- permission setup (Linux/macOS)
+- CFFI interface build (if missing)
+- SDK/plugin installation
+- macOS Gatekeeper fixups
 
 **Python API:**
 ```python
-from wooting_package.post_install import install_plugins
+from wooting_package.package_setup import install_plugins
 install_plugins()
 ```
 
@@ -57,14 +63,11 @@ install_plugins()
 
 Remove SDK and plugins but keep the Python interface:
 
-**CLI:**
-```bash
-wooting-uninstall-plugins
-```
+No dedicated CLI command is exposed for plugin-only uninstall.
 
 **Python API:**
 ```python
-from wooting_package.post_install import uninstall_plugins
+from wooting_package.package_setup import uninstall_plugins
 uninstall_plugins()
 ```
 
@@ -86,7 +89,7 @@ This removes:
 
 **Python API:**
 ```python
-from wooting_package.wooting_utils import delete_interface
+from wooting_package.package_setup import delete_interface
 delete_interface(cleanup_plugins=True)
 ```
 
@@ -101,7 +104,7 @@ wooting-delete-interface
 
 **Python API:**
 ```python
-from wooting_package.wooting_utils import delete_interface
+from wooting_package.package_setup import delete_interface
 delete_interface()  # or delete_interface(cleanup_plugins=False)
 ```
 
@@ -155,7 +158,7 @@ else:
 
 **Solution**:
 ```bash
-wooting-install-plugins
+wooting-build-interface
 ```
 
 Then test again:
@@ -210,7 +213,7 @@ The Gatekeeper setup should handle code signing automatically, but if you encoun
 
 ```bash
 # Reinstall and let Gatekeeper setup run
-wooting-install-plugins
+wooting-build-interface
 ```
 
 ### Linux: "Permission denied" when accessing keyboard
@@ -232,7 +235,7 @@ sudo usermod -a -G input $USER
 cat /etc/udev/rules.d/70-wooting.rules
 
 # 5. If missing, reinstall permissions
-wooting-install-plugins
+wooting-build-interface
 ```
 
 ## Advanced: Custom Plugin Paths

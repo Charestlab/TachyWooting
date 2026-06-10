@@ -6,6 +6,13 @@ For deeper implementation details, see [documentation.md](documentation.md).
 Read the Docs/Sphinx sources live in [docs/](docs/) and use NumPy-style docstrings.
 Console scripts are documented in [docs/scripts.md](docs/scripts.md).
 
+## Project Documentation
+
+- [README.md](README.md): project overview and quick start
+- [documentation.md](documentation.md): technical details and architecture notes
+- [development.md](development.md): maintainer workflow and SDK update process
+- [PLUGIN_MANAGEMENT.md](PLUGIN_MANAGEMENT.md): plugin installation and troubleshooting
+
 - **Analog Key Acquisition**: Read key positions (0.0–1.0) with microsecond-level timing
 - **Threshold-Based Triggering**: Automatically capture key press trajectories around actuation threshold
 - **HDF5 Logging**: Hierarchical per-trial logging with automatic shard merging
