@@ -71,6 +71,9 @@ ENV/
 *.swp
 *.swo
 
+# Local act configuration
+.actrc
+
 # Generated CFFI interface artifacts.
 # Keep the package marker, but ignore native files produced on each machine.
 wooting_package/interface/*

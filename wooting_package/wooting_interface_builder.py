@@ -163,6 +163,7 @@ def get_platform_config(binary_dir, include_dir):
         ]
         # $ORIGIN resolves relative to the compiled extension on ELF platforms.
         extra_link_args = [
+            os.path.join(binary_dir, f"lib{SDK_LIBRARY_NAME}.so"),
             "-Wl,-rpath,$ORIGIN/../libraries/linux/release",
         ]
         system_libs = []
@@ -197,7 +198,7 @@ def get_platform_config(binary_dir, include_dir):
 
 def get_link_libraries(system_libs):
     """Return native libraries to link for the current platform."""
-    if SYSTEM == "windows":
+    if SYSTEM in {"linux", "windows"}:
         return system_libs
     return [SDK_LIBRARY_NAME] + system_libs
 
