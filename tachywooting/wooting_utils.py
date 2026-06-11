@@ -483,15 +483,23 @@ class WOOTING_ACQUISITION:
 
     backend : Literal["auto", "read_analog", "read_full_buffer"]
         Readout strategy for key positions:
-          - "auto": uses read_analog for a single target, read_full_buffer for multiple targets
-          - "read_analog": polls each target key with the per-key SDK call
-          - "read_full_buffer": reads pressed keys in one call and extracts only target keys
+
+        ``"auto"``
+            Uses read_analog for a single target and read_full_buffer for multiple targets.
+        ``"read_analog"``
+            Polls each target key with the per-key SDK call.
+        ``"read_full_buffer"``
+            Reads pressed keys in one call and extracts only target keys.
 
     timing_mode : Literal["sleep", "busy", "hybrid"]
         Cadence control mode used internally to keep a stable sampling rate:
-          - "sleep": low CPU, higher jitter
-          - "busy": high CPU, lower jitter
-          - "hybrid": sleep most of the interval, spin near the deadline (recommended)
+
+        ``"sleep"``
+            Low CPU, higher jitter.
+        ``"busy"``
+            High CPU, lower jitter.
+        ``"hybrid"``
+            Sleep most of the interval, spin near the deadline (recommended).
 
     spin_margin_s : float
         Only used when timing_mode="hybrid". Final time window (seconds) in which the loop
@@ -506,8 +514,12 @@ class WOOTING_ACQUISITION:
 
     int_analog : Literal[1, 2]
         Logging mode:
-          - 1 = integer mode (positions saved as 0..255)
-          - 2 = analog mode (positions saved as 0..1)
+
+        ``1``
+            Integer mode; positions are saved as 0..255.
+        ``2``
+            Analog mode; positions are saved as 0..1.
+
         Must match the acquisition method you use (integer vs analog).
 
     output_paths : dict[str, str]
@@ -536,73 +548,6 @@ class WOOTING_ACQUISITION:
 
     last_trial_had_removal : bool
         Whether the most recently completed trial contained at least one finger removal.
-
-    Public methods (intended for users)
-    -----------------------------------
-    setup_logging(name: str | None = None, path: str | None = None, int_analog: int = 2) -> None
-        Enable hierarchical HDF5 logging. Internally, each trial is written as a shard file and
-        all shards are merged into a single HDF5 file on uninitialize_keyboard().
-        - name: base name (without extension) for the combined file (e.g., "tracking")
-        - path: output directory (default: current working directory)
-        - int_analog: 1 (integer 0..255) or 2 (analog 0..1)
-
-    initialize_keyboard(verbose: bool = False) -> bool
-        Initialize the Wooting SDK for the current process and detect connected devices.
-        Must be called before acquisition. If verbose=True, prints device information.
-
-    acquire_analog_values(
-        target_keys,
-        duration_after_threshold: float = 0.5,
-        duration_before_threshold: float = 0.2,
-        sampling_interval: float = 1/8000,
-        verbose: bool = False,
-        trial_start_perf_ns: Optional[int] = None,
-    ) -> dict
-        Acquire analog samples (0..1) for the given target keys around a threshold crossing.
-        - The trial triggers when ANY target key crosses `threshold`.
-        - Only target keys are returned/logged.
-        - trial_start_perf_ns defines trial start (stimulus onset reference), if not giving 
-        approximate it by starting a clock.
-
-        Returns a hierarchical dict:
-            { "<trial>": { "<keycode>": {"position", "time_to_threshold", "time_abs"} } }
-        If logging is enabled with int_analog=2, the trial is written to the HDF5 shards.
-
-    acquire_integer_values(
-        target_keys,
-        duration_after_threshold: float = 0.5,
-        duration_before_threshold: float = 0.2,
-        sampling_interval: float = 1/8000,
-        verbose: bool = False,
-        trial_start_perf_ns: Optional[int] = None,
-    ) -> dict
-        Same as acquire_analog_values, but positions are returned/logged as integers (0..255).
-        Requires logging to be configured with int_analog=1 if you want on-disk logs.
-        - trial_start_perf_ns defines trial start (stimulus onset reference), if not giving 
-        approximate it by starting a clock.
-
-    wait_keys_light_press(
-        target_keys,
-        hold_seconds: float = 0.30,
-        timeout_seconds: float | None = None,
-        verbose: bool = False,
-    ) -> float
-        “Ready” check before a trial: waits until ALL target keys are lightly pressed at the
-        same time and remain in range for `hold_seconds`.
-        - Low bound is fixed at 0.01.
-        - High bound is `self.max_pressure_start`.
-        - Sampling rate is fixed at 1000 Hz (internal).
-        Returns the perf_counter() timestamp when the condition is satisfied.
-        Raises TimeoutError if timeout_seconds is exceeded.
-
-    trial_contains_removal(trial_index: int) -> bool
-        Return whether the given trial index was flagged for a finger removal.
-
-    reached_consecutive_removal_limit(n: int) -> bool
-        Return True when the current consecutive-removal streak is at least `n`.
-
-    reached_total_removal_limit(n: int) -> bool
-        Return True when the cumulative number of flagged trials reaches `n`, `2n`, `3n`, etc.
 
     Notes
     -----
@@ -1446,7 +1391,7 @@ class WOOTING_ACQUISITION:
         continuous acquisition timeline.
 
         Optional quit-key detection (no forced exit)
-        -------------------------------------------
+        --------------------------------------------
         If `quit_key` is provided, the function monitors that key during the trial and
         returns a boolean flag indicating whether it was pressed at least once.
         IMPORTANT: pressing `quit_key` does NOT stop acquisition; it only sets the flag.
@@ -1582,7 +1527,7 @@ class WOOTING_ACQUISITION:
         first (then it is canceled).
 
         Optional quit-key detection (no forced exit)
-        -------------------------------------------
+        --------------------------------------------
         If `quit_key` is provided, the function returns `(hier, quit_pressed)` where
         `quit_pressed` indicates whether the quit key was pressed at least once during
         the trial. Pressing the quit key does NOT stop acquisition.

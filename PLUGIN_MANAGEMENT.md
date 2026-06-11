@@ -262,7 +262,7 @@ plugin_dirs = {
 
 - **Issues?** Check the troubleshooting section above
 - **Still stuck?** Verify file permissions and paths match the platform
-- **Need help?** See [README.md](README.md) for more information
+- **Need help?** See the repository README for more information
 
 ## Security Considerations
 

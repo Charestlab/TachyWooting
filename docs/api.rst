@@ -5,9 +5,6 @@ Public Package API
 ------------------
 
 .. automodule:: tachywooting
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 Acquisition
 -----------
@@ -20,9 +17,16 @@ Acquisition
 Feedback Logic
 --------------
 
-.. automodule:: tachywooting.feedback
+.. autoclass:: tachywooting.feedback.PressureFeedbackConfig
    :members:
-   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: tachywooting.feedback.PressureFeedbackState
+   :members:
+   :show-inheritance:
+
+.. autoclass:: tachywooting.feedback.PressureScaleMapper
+   :members:
    :show-inheritance:
 
 TachyPy Widget

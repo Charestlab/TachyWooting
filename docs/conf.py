@@ -28,11 +28,16 @@ napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 napoleon_use_param = True
 napoleon_use_rtype = True
+suppress_warnings = ["myst.xref_missing"]
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "sphinx_rtd_theme"
+html_theme_options = {
+    "collapse_navigation": False,
+    "navigation_depth": 4,
+}
 html_static_path = ["_static"]
 
 os.environ.setdefault("WOOTING_DOCS_BUILD", "1")
