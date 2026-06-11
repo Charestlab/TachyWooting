@@ -12,6 +12,8 @@ wooting-demo = "tachywooting.demos.cli:main"
 
 Runs a terminal demo for reading analog pressure from a selected key.
 
+![Wooting terminal demo](../repo_visuals/gifs/wooting-demo.gif)
+
 Typical use:
 
 ```bash
@@ -71,8 +73,11 @@ wooting-visual-fixation-demo = "tachywooting.demos.visual_fixation_demo:main"
 
 Runs the TachyPy visual readiness demo with the interactive fixation cross.
 
+![Wooting visual fixation demo](../repo_visuals/gifs/wooting-visual-fixation-demo.gif)
+
 Default behavior:
 
+- Opens in a 1502x750 window by default.
 - Uses `z` as the left key and `c` as the right key.
 - Shows real-time pressure feedback.
 - Tracks hits, elapsed time, and efficiency.
@@ -103,6 +108,12 @@ wooting-visual-fixation-demo \
   --hold-seconds 0.30
 ```
 
+Use `--fullscreen` only when you explicitly want TachyPy fullscreen mode:
+
+```bash
+wooting-visual-fixation-demo --fullscreen --screen-number 0
+```
+
 ## `wooting-mini-bw-experiment`
 
 Entry point:
@@ -112,6 +123,8 @@ wooting-mini-bw-experiment = "tachywooting.demos.mini_bw_experiment:main"
 ```
 
 Runs a no-file TachyPy mini-experiment for testing response trials and finger-removal tracking.
+
+![Wooting mini black-white experiment](../repo_visuals/gifs/wooting-mini-bw-experiment.gif)
 
 Default behavior:
 

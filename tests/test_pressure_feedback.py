@@ -155,6 +155,78 @@ def test_tachypy_widget_can_copy_existing_fixation_cross(monkeypatch):
     assert widget.target_color == (10, 20, 30)
 
 
+@pytest.mark.parametrize("thickness", [3, 4, 5, 6])
+def test_goal_markers_touch_ideal_pressure_bar_edges(monkeypatch, thickness):
+    class FakeLine:
+        created = []
+
+        def __init__(self, start_point, end_point, thickness, color):
+            self.start_point = start_point
+            self.end_point = end_point
+            self.thickness = thickness
+            self.color = color
+            self.created.append(self)
+
+        def set_start_point(self, start_point):
+            self.start_point = start_point
+
+        def set_end_point(self, end_point):
+            self.end_point = end_point
+
+        def set_thickness(self, thickness):
+            self.thickness = thickness
+
+        def set_color(self, color):
+            self.color = color
+
+        def draw(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, "tachypy", types.SimpleNamespace(Line=FakeLine))
+    widget = TachyPyInteractiveFixationCross(
+        screen=object(),
+        center=(50, 40),
+        half_width=10,
+        half_height=5,
+        thickness=thickness,
+        show_goal_markers=True,
+    )
+    state = PressureFeedbackState(
+        PressureFeedbackConfig(
+            min_pressure_start=0.1,
+            max_pressure_start=0.4,
+            threshold=0.8,
+            hold_seconds=0.5,
+        )
+    )
+    state.update(0.2, 0.2, now=1.0)
+
+    widget.update(state)
+    widget.draw()
+
+    assert widget.left_scale == 1.0
+    assert widget.right_scale == 1.0
+    expected_marker_width = max(1.0, widget.thickness * 0.25)
+    left_edge_x = widget._left_line.start_point[0]
+    right_edge_x = widget._right_line.end_point[0]
+    center_y = widget._left_line.start_point[1]
+    assert widget._left_marker.start_point == (left_edge_x - expected_marker_width, center_y)
+    assert widget._left_marker.end_point == (left_edge_x, center_y)
+    assert widget._right_marker.start_point == (right_edge_x, center_y)
+    assert widget._right_marker.end_point == (right_edge_x + expected_marker_width, center_y)
+    assert widget._left_marker.thickness == widget.thickness
+    assert widget._right_marker.thickness == widget.thickness
+    assert widget._left_marker.thickness == widget._left_line.thickness
+    assert widget._right_marker.thickness == widget._right_line.thickness
+    assert FakeLine.created == [
+        widget._left_marker,
+        widget._right_marker,
+        widget._left_line,
+        widget._right_line,
+        widget._vertical_line,
+    ]
+
+
 def test_tachypy_widget_accepts_acquisition_settings(monkeypatch):
     class FakeLine:
         def __init__(self, start_point, end_point, thickness, color):

@@ -238,10 +238,7 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         bottom_y = center_y - self.half_height
 
         if self.show_goal_markers:
-            marker_h = self.thickness / 2
-            self._draw_line("_left_marker", (center_x - self.half_width - 1, center_y - marker_h), (center_x - self.half_width - 1, center_y + marker_h), self.target_color, thickness=2)
-            self._draw_line("_right_marker", (center_x + self.half_width + 1, center_y - marker_h), (center_x + self.half_width + 1, center_y + marker_h), self.target_color, thickness=2)
-
+            self._draw_goal_markers(center_x, center_y)
         if self.left_scale > 0.0:
             self._draw_line("_left_line", (left_x, center_y), (center_x, center_y), self.color)
         if self.right_scale > 0.0:
@@ -274,6 +271,25 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
             line.set_color(color)
             line.set_thickness(t)
         line.draw()
+
+    def _draw_goal_markers(self, center_x: float, center_y: float) -> None:
+        marker_width = max(1.0, self.thickness * 0.25)
+        left_marker_x = center_x - self.half_width
+        right_marker_x = center_x + self.half_width
+        self._draw_line(
+            "_left_marker",
+            (left_marker_x - marker_width, center_y),
+            (left_marker_x, center_y),
+            self.target_color,
+            thickness=self.thickness,
+        )
+        self._draw_line(
+            "_right_marker",
+            (right_marker_x, center_y),
+            (right_marker_x + marker_width, center_y),
+            self.target_color,
+            thickness=self.thickness,
+        )
 
     def _draw_pressure_text(self, center_x: float, top_y: float) -> None:
         text_y1 = top_y + self.pressure_text_gap

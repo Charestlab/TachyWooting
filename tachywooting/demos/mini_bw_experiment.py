@@ -5,7 +5,7 @@ import random
 import time
 
 import numpy as np
-from tachypy import ResponseHandler, Screen, Text, Texture
+from tachypy import FixationCross, ResponseHandler, Screen, Text, Texture
 
 from tachywooting import WOOTING_ACQUISITION
 
@@ -30,6 +30,13 @@ def main() -> int:
 
         w, h = screen.width, screen.height
         margin = 16
+        readiness_fixation = FixationCross(
+            center=(w // 2, h // 2),
+            half_width=18,
+            half_height=18,
+            thickness=8,
+            color=(0, 0, 0),
+        )
 
         white_tex = Texture(np.ones((256, 256, 3), dtype=np.uint8) * 255)
         black_tex = Texture(np.zeros((256, 256, 3), dtype=np.uint8))
@@ -71,9 +78,9 @@ def main() -> int:
                 target_keys=[YES_KEY, NO_KEY],
                 response_handler=rh,
                 exit_keys=QUIT_KEYS,
+                fixation_cross=readiness_fixation,
                 show_pressure_text=True,
-                left_pressure_label=YES_KEY.upper(),
-                right_pressure_label=NO_KEY.upper(),
+                show_goal_markers=True,
             ):
                 break
 
@@ -106,7 +113,7 @@ def main() -> int:
             label.draw()
             score.draw()
             screen.flip()
-            time.sleep(0.75)
+            time.sleep(0.25)
 
             if acq.wait_keys_released(
                 target_keys=[YES_KEY, NO_KEY],

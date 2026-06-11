@@ -14,6 +14,8 @@ CROSS_COLOR = (0, 0, 0)
 QUIT_KEYS = {"escape", "esc", "enter", "return", "space", "q"}
 RUN_KEY = "x"
 RUN_DURATION = 15.0
+WINDOWED_WIDTH = 1502
+WINDOWED_HEIGHT = 750
 FIX_CROSS_LINE = 3
 FIX_CROSS_RATIO = 3
 FIX_CROSS_HALF = FIX_CROSS_LINE * (FIX_CROSS_RATIO + 1)  # = 12  (run cross)
@@ -28,10 +30,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--screen-number", type=int, default=0)
     parser.add_argument("--refresh-rate", type=int, default=240)
-    parser.add_argument("--windowed", action="store_true")
+    parser.add_argument("--fullscreen", action="store_true", help="Use TachyPy fullscreen mode. By default the demo opens in a 1502x750 window.")
     parser.add_argument("--left-key", default="z")
     parser.add_argument("--right-key", default="c")
-    parser.add_argument("--hold-seconds", type=float, default=5.00)
+    parser.add_argument("--hold-seconds", type=float, default=1.00)
     parser.add_argument("--min-pressure", type=float, default=0.33)
     parser.add_argument("--max-pressure", type=float, default=0.66)
     parser.add_argument("--threshold", type=float, default=0.80)
@@ -118,6 +120,7 @@ class GamifiedFixationWidget:
         started_at: float,
         hold_seconds: float,
         font_name: str = "Helvetica",
+        compact_layout: bool = False,
     ):
         self.screen = screen
         self.fixation_widget = fixation_widget
@@ -126,6 +129,7 @@ class GamifiedFixationWidget:
         self.started_at = float(started_at)
         self.hold_seconds = float(hold_seconds)
         self.font_name = font_name
+        self.compact_layout = bool(compact_layout)
         self.hits = 0
         self.flash_until = 0.0
         # Run state
@@ -210,9 +214,21 @@ class GamifiedFixationWidget:
         font_size = max(16, int(min(width, height) * 0.026))
         small_font_size = max(14, int(font_size * 0.78))
 
-        timer_rect = self._rect_centered(width / 2, margin + font_size, 220, font_size * 1.8)
-        hits_rect = self._rect(margin, margin, 180, font_size * 1.8)
-        efficiency_rect = self._rect(width - margin - 220, margin, 220, font_size * 1.8)
+        if self.compact_layout:
+            font_size = max(22, int(min(width, height) * 0.032))
+            small_font_size = max(16, int(font_size * 0.76))
+            hud_y = margin
+            line_h = font_size * 2.1
+            timer_w = 260
+            hits_w = 220
+            efficiency_w = 330
+            timer_rect = self._rect_centered(width / 2, hud_y + line_h / 2, timer_w, line_h)
+            hits_rect = self._rect(margin, hud_y, hits_w, line_h)
+            efficiency_rect = self._rect(width - margin - efficiency_w, hud_y, efficiency_w, line_h)
+        else:
+            timer_rect = self._rect_centered(width / 2, margin + font_size, 220, font_size * 1.8)
+            hits_rect = self._rect(margin, margin, 180, font_size * 1.8)
+            efficiency_rect = self._rect(width - margin - 220, margin, 220, font_size * 1.8)
 
         if self._run_active:
             remaining = self._run_remaining()
@@ -221,7 +237,10 @@ class GamifiedFixationWidget:
             self._efficiency_text = self._draw_text(self._efficiency_text, f"Efficiency  {self._run_efficiency_percent():05.1f}%", efficiency_rect, font_size)
         else:
             elapsed = max(0.0, time.perf_counter() - self.started_at)
-            controls_rect = self._rect(width - margin - 180, height - margin - small_font_size * 5, 180, small_font_size * 5)
+            if self.compact_layout:
+                controls_rect = self._rect_centered(width / 2, height - margin - small_font_size * 2.6, 220, small_font_size * 4.0)
+            else:
+                controls_rect = self._rect(width - margin - 180, height - margin - small_font_size * 5, 180, small_font_size * 5)
             self._timer_text = self._draw_text(self._timer_text, f"Time  {elapsed:05.1f}s", timer_rect, font_size)
             self._hits_text = self._draw_text(self._hits_text, f"Hits  {self.hits}", hits_rect, font_size)
             self._efficiency_text = self._draw_text(self._efficiency_text, f"Efficiency  {self._efficiency_percent(elapsed):05.1f}%", efficiency_rect, font_size)
@@ -230,8 +249,12 @@ class GamifiedFixationWidget:
         if self._has_best:
             label_h = small_font_size * 1.6
             value_h = font_size * 2.0
-            label_rect = self._rect(margin, height - margin - label_h - value_h, 300, label_h)
-            value_rect = self._rect(margin, height - margin - value_h, 300, value_h)
+            if self.compact_layout:
+                label_rect = self._rect(margin, height - margin - label_h - value_h, 360, label_h)
+                value_rect = self._rect(margin, height - margin - value_h, 360, value_h)
+            else:
+                label_rect = self._rect(margin, height - margin - label_h - value_h, 300, label_h)
+                value_rect = self._rect(margin, height - margin - value_h, 300, value_h)
             self._best_label_text = self._draw_text(self._best_label_text, "BEST SCORE", label_rect, small_font_size, color=(70, 70, 70))
             self._best_value_text = self._draw_text(self._best_value_text, f"{self.best_hits} hits   {self.best_efficiency:.1f}%", value_rect, font_size)
 
@@ -244,7 +267,7 @@ class GamifiedFixationWidget:
         return min(999.9, max(0.0, (self.hits / theoretical_hits) * 100.0))
 
     def _draw_text(self, text_obj, text: str, dest_rect, font_size: int, color=None):
-        dest_rect = self._clamp_rect(dest_rect)
+        dest_rect = self._snap_rect(self._clamp_rect(dest_rect))
         draw_color = color if color is not None else CROSS_COLOR
         if text_obj is None:
             text_obj = self.text_cls(
@@ -281,6 +304,11 @@ class GamifiedFixationWidget:
         x1 = min(max(0.0, x1), screen_width - width)
         y1 = min(max(0.0, y1), screen_height - height)
         return (x1, y1, x1 + width, y1 + height)
+
+    @staticmethod
+    def _snap_rect(rect):
+        x1, y1, x2, y2 = rect
+        return (round(x1), round(y1), round(x2), round(y2))
 
 
 def _draw_countdown(screen, widget, text_cls, background_color_fn, font_name: str) -> None:
@@ -334,7 +362,9 @@ def main() -> int:
     try:
         screen = Screen(
             screen_number=args.screen_number,
-            fullscreen=not args.windowed,
+            width=None if args.fullscreen else WINDOWED_WIDTH,
+            height=None if args.fullscreen else WINDOWED_HEIGHT,
+            fullscreen=args.fullscreen,
             desired_refresh_rate=args.refresh_rate,
             backend=args.backend,
         )
@@ -379,6 +409,7 @@ def main() -> int:
             started_at=time.perf_counter(),
             hold_seconds=args.hold_seconds,
             font_name="Helvetica",
+            compact_layout=not args.fullscreen,
         )
 
         print("Press Escape, Enter, Space, or q to quit.")

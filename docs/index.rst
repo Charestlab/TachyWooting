@@ -8,9 +8,8 @@ finger-removal tracking, logging, and optional TachyPy visual feedback.
    :maxdepth: 2
    :caption: Contents
 
-   installation
    usage
-   console_scripts
+   scripts
    api
    readme
    documentation

@@ -2,7 +2,7 @@
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
 [![Python versions](https://img.shields.io/pypi/pyversions/tachywooting)](https://pypi.org/project/tachywooting/)
-[![Tests](https://github.com/mathiassalvas/wooting-analog/actions/workflows/CI.yml/badge.svg)](https://github.com/mathiassalvas/wooting-analog/actions/workflows/CI.yml)
+[![Tests](https://github.com/Kaapra/Analog-keyboard/actions/workflows/test-install.yml/badge.svg)](https://github.com/Kaapra/Analog-keyboard/actions/workflows/test-install.yml)
 
 Python bindings and acquisition utilities for Wooting analog keyboards.
 
@@ -105,6 +105,8 @@ acq.wait_keys_light_press_visual(
 )
 ```
 
+![Visual light-press readiness feedback](repo_visuals/gifs/wooting-mini-bw-experiment.gif)
+
 ## HDF5 Logging
 
 `setup_logging()` writes one temporary shard per trial and merges shards when `uninitialize_keyboard()` is called.
@@ -152,5 +154,7 @@ If no devices are detected, confirm the keyboard is connected, Wootility recogni
 ## Hardware Requirements
 
 This package was developed and tested with the **Wooting UwU** keypad ([wooting.io/uwu](https://wooting.io/uwu)), and its use is strongly recommended for optimal results.
+
+![Wooting UwU keypad](repo_visuals/UwU_keyboard.png)
 
 The UwU is a 3-key Hall effect keypad using [**Lekker L45 V2 linear switches**](https://wooting.io/product/lekker-switch-l45-v2) — contactless magnetic sensors with a smooth linear force curve (30–45 cN, no tactile bump). Keys can be configured to actuate at any depth from 0.1mm to 4.0mm.
