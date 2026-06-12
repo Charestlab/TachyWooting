@@ -43,7 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tachypy = [
-    "tachypy==0.1.14",
+    "tachypy>=0.1.16",
 ]
 docs = [
     "myst-parser>=2.0.0",

@@ -37,14 +37,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-pressure", type=float, default=0.33)
     parser.add_argument("--max-pressure", type=float, default=0.66)
     parser.add_argument("--threshold", type=float, default=0.80)
-    parser.add_argument("--release-hold-seconds", type=float, default=0.15)
+
     parser.add_argument("--half-width", type=float, default=FIX_CROSS_IDLE_HALF)
     parser.add_argument("--half-height", type=float, default=FIX_CROSS_IDLE_HALF)
     parser.add_argument("--thickness", type=float, default=FIX_CROSS_IDLE_LINE)
     parser.add_argument("--run-half-width", type=float, default=FIX_CROSS_HALF)
     parser.add_argument("--run-half-height", type=float, default=FIX_CROSS_HALF)
     parser.add_argument("--run-thickness", type=float, default=FIX_CROSS_LINE)
-    parser.add_argument("--backend", default="pygame", choices=["pygame", "glfw"])
     return parser
 
 
@@ -85,11 +84,13 @@ class _ExitKeyTracker:
     @keys_to_listen.setter
     def keys_to_listen(self, value) -> None:
         self._rh.keys_to_listen = value
-        # GLFW only tracks keys registered via track_keys(); update it when the list changes.
-        if value is not None and getattr(self._rh, "backend", None) == "glfw":
-            screen = getattr(self._rh, "screen", None)
-            if screen is not None and hasattr(screen, "track_keys"):
-                screen.track_keys(value)
+        if value is not None:
+            if hasattr(self._rh, "_probed_keys"):
+                self._rh._probed_keys.update(value)
+            if getattr(self._rh, "backend", None) == "glfw":
+                screen = getattr(self._rh, "screen", None)
+                if screen is not None and hasattr(screen, "track_keys"):
+                    screen.track_keys(value)
 
 
 class GamifiedFixationWidget:
@@ -366,7 +367,6 @@ def main() -> int:
             height=None if args.fullscreen else WINDOWED_HEIGHT,
             fullscreen=args.fullscreen,
             desired_refresh_rate=args.refresh_rate,
-            backend=args.backend,
         )
         if hasattr(screen, "hide_mouse"):
             screen.hide_mouse()
@@ -412,14 +412,14 @@ def main() -> int:
             compact_layout=not args.fullscreen,
         )
 
-        print("Press Escape, Enter, Space, or q to quit.")
-        print(f"Use {args.left_key!r} for left and {args.right_key!r} for right.")
-        print(f"Press {RUN_KEY!r} to start a {RUN_DURATION:.0f}s run.")
-
         def draw_release_frame() -> None:
             screen.fill(widget.background_color())
             widget.draw()
             screen.flip()
+
+        print("Press Escape, Enter, Space, or q to quit.")
+        print(f"Use {args.left_key!r} for left and {args.right_key!r} for right.")
+        print(f"Press {RUN_KEY!r} to start a {RUN_DURATION:.0f}s run.")
 
         while True:
             in_run = widget._run_active
@@ -460,7 +460,7 @@ def main() -> int:
             try:
                 released_at = acq.wait_keys_released(
                     target_keys=[args.left_key, args.right_key],
-                    hold_seconds=args.release_hold_seconds,
+                    hold_seconds=0.01,
                     response_handler=key_tracker,
                     exit_keys=QUIT_KEYS,
                     on_tick=draw_release_frame,

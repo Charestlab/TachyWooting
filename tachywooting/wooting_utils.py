@@ -1934,6 +1934,8 @@ class WOOTING_ACQUISITION:
         exit_key_set = {str(key).lower() for key in exit_keys}
         if response_handler is not None and hasattr(response_handler, "keys_to_listen"):
             response_handler.keys_to_listen = sorted(exit_key_set)
+            if hasattr(response_handler, "_probed_keys"):
+                response_handler._probed_keys.update(exit_key_set)
 
         if widget is None:
             try:
@@ -2087,6 +2089,8 @@ class WOOTING_ACQUISITION:
         exit_key_set = {str(key).lower() for key in exit_keys}
         if response_handler is not None and hasattr(response_handler, "keys_to_listen"):
             response_handler.keys_to_listen = sorted(exit_key_set)
+            if hasattr(response_handler, "_probed_keys"):
+                response_handler._probed_keys.update(exit_key_set)
 
         interval = 1.0 / 1000.0  # fixed 1000 Hz
         next_t = time.perf_counter()

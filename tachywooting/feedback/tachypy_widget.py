@@ -273,7 +273,8 @@ class TachyPyInteractiveFixationCross(PressureFeedbackWidget):
         line.draw()
 
     def _draw_goal_markers(self, center_x: float, center_y: float) -> None:
-        marker_width = max(1.0, self.thickness * 0.25)
+        SIZE_FACTOR = 0.33
+        marker_width = max(1.0, self.thickness * SIZE_FACTOR)
         left_marker_x = center_x - self.half_width
         right_marker_x = center_x + self.half_width
         self._draw_line(
