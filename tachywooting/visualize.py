@@ -4,7 +4,7 @@ visualize.py — viewer for Wooting HDF5 logs.
 
 Data layout:
   /trials/<trial4>/keys/<key4>/values   # shape=(N, 3)
-Columns: ["position", "time_to_threshold", "time_abs"]
+Columns: ["position", "time_from_onset", "time_abs"]
 
 Usage:
   wooting-visualize FILE.hdf5 --list
@@ -21,7 +21,7 @@ from typing import Optional
 import h5py
 import numpy as np
 
-FIXED_COLUMNS = ["position", "time_to_threshold", "time_abs"]
+FIXED_COLUMNS = ["position", "time_from_onset", "time_abs"]
 _COLOR_SINGLE = "#4C72B0"
 _COLOR_THRESH = "#C0392B"
 _COLOR_TITLE  = "#1C1C2E"
@@ -103,7 +103,9 @@ def _load_xy(f: h5py.File, trial4: str, key4: str):
         if cols_attr is not None
         else FIXED_COLUMNS
     )
-    i_pos, i_tth, i_abs = map(cols.index, ("position", "time_to_threshold", "time_abs"))
+    # Accept the legacy "time_to_threshold" column label from older log files.
+    time_col = "time_from_onset" if "time_from_onset" in cols else "time_to_threshold"
+    i_pos, i_tth, i_abs = map(cols.index, ("position", time_col, "time_abs"))
     return arr[:, i_pos], arr[:, i_tth], arr[:, i_abs], cols
 
 

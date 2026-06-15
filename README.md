@@ -114,7 +114,7 @@ Final files use this layout:
 Each `values` dataset stores columns in this order:
 
 ```text
-position, time_to_threshold, time_abs
+position, time_from_onset, time_abs
 ```
 
 ## Visualize Logs

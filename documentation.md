@@ -296,7 +296,7 @@ Final HDF5 files use this layout:
 Each `values` dataset is shaped as `N x 3` and stores:
 
 ```text
-position, time_to_threshold, time_abs
+position, time_from_onset, time_abs
 ```
 
 Trial attributes may include:
@@ -316,7 +316,7 @@ python -m tachywooting.visualize logs/tracking.hdf5 --list
 python -m tachywooting.visualize logs/tracking.hdf5 --trial 1 --key 4
 ```
 
-It plots position against `time_to_threshold` and shows `time_abs` on a secondary x-axis.
+It plots position against `time_from_onset` and shows `time_abs` on a secondary x-axis.
 
 ## SDK Error Codes
 

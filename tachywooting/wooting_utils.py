@@ -272,7 +272,7 @@ def _write_trial_file(
     hier_trial: Dict[str, Dict[str, Dict[str, Sequence[float]]]],
     backend: Optional[str] = None,
     trial_start_perf_ns: Optional[int] = None,
-    stim_on_clock: Optional[str] = None,
+    trial_start_clock: Optional[str] = None,
     threshold: Optional[float] = None,
     threshold_time: Optional[float] = None,
     threshold_key: Optional[int] = None,
@@ -281,7 +281,7 @@ def _write_trial_file(
     """Write one per-trial shard as hierarchical HDF5.
 
     Layout:
-      /trials/<trial4>/keys/<key4>/values (N×3: [position, time_to_threshold, time_abs])
+      /trials/<trial4>/keys/<key4>/values (N×3: [position, time_from_onset, time_abs])
 
     Adds:
       /trials/<trial4>.attrs["backend"] = b"..."
@@ -303,8 +303,8 @@ def _write_trial_file(
             if trial_start_perf_ns is not None:
                 g_trial.attrs["trial_start_perf_ns"] = np.int64(int(trial_start_perf_ns))
 
-            if stim_on_clock is not None:
-                g_trial.attrs["stim_on_clock"] = str(stim_on_clock).encode("utf-8")
+            if trial_start_clock is not None:
+                g_trial.attrs["trial_start_clock"] = str(trial_start_clock).encode("utf-8")
 
             if threshold is not None:
                 g_trial.attrs["threshold"] = np.float64(float(threshold))
@@ -323,7 +323,7 @@ def _write_trial_file(
                     list(
                         zip(
                             serie.get("position", []),
-                            serie.get("time_to_threshold", []),
+                            serie.get("time_from_onset", []),
                             serie.get("time_abs", []),
                         )
                     ),
@@ -345,7 +345,7 @@ def _write_trial_file(
                         shuffle=True,
                     )
                     ds.attrs["columns"] = np.array(
-                        ["position", "time_to_threshold", "time_abs"], dtype="S"
+                        ["position", "time_from_onset", "time_abs"], dtype="S"
                     )
 
 
@@ -378,8 +378,8 @@ def _combine_all_trials(staging_dir: str, final_dir: str, base: str) -> None:
                         if "trial_start_perf_ns" in g_in_trial.attrs and "trial_start_perf_ns" not in g_out_trial.attrs:
                             g_out_trial.attrs["trial_start_perf_ns"] = g_in_trial.attrs["trial_start_perf_ns"]
 
-                        if "stim_on_clock" in g_in_trial.attrs and "stim_on_clock" not in g_out_trial.attrs:
-                            g_out_trial.attrs["stim_on_clock"] = g_in_trial.attrs["stim_on_clock"]
+                        if "trial_start_clock" in g_in_trial.attrs and "trial_start_clock" not in g_out_trial.attrs:
+                            g_out_trial.attrs["trial_start_clock"] = g_in_trial.attrs["trial_start_clock"]
 
                         if "threshold" in g_in_trial.attrs and "threshold" not in g_out_trial.attrs:
                             g_out_trial.attrs["threshold"] = g_in_trial.attrs["threshold"]
@@ -679,7 +679,7 @@ class WOOTING_ACQUISITION:
 
         # cache of last trial's stimulus-onset reference (persisted to HDF5)
         self._last_trial_start_perf_ns: Optional[int] = None
-        self._last_stim_on_clock: Optional[str] = None
+        self._last_trial_start_clock: Optional[str] = None
         self._last_threshold_time: Optional[float] = None
         self._last_threshold_key: Optional[int] = None
 
@@ -807,7 +807,7 @@ class WOOTING_ACQUISITION:
             hier_trial          = hier,
             backend             = self.last_backend,
             trial_start_perf_ns = self._last_trial_start_perf_ns,
-            stim_on_clock       = self._last_stim_on_clock,
+            trial_start_clock       = self._last_trial_start_clock,
             threshold           = self.threshold,
             threshold_time      = self._last_threshold_time,
             threshold_key       = self._last_threshold_key,
@@ -1183,12 +1183,12 @@ class WOOTING_ACQUISITION:
         """bins[(trial, keycode)] = [(tth, tabs, pos), ...]"""
         hier: Dict[str, Dict[str, Dict[str, np.ndarray]]] = {}
         for (t, k), triplets in bins.items():
-            triplets.sort(key=lambda x: x[0])  # by time_to_threshold
+            triplets.sort(key=lambda x: x[0])  # by time_from_onset
             tth = np.fromiter((x[0] for x in triplets), dtype=np.float64, count=len(triplets))
             tabs = np.fromiter((x[1] for x in triplets), dtype=np.float64, count=len(triplets))
             pos = np.fromiter((x[2] for x in triplets), dtype=np.float64, count=len(triplets))
             hier.setdefault(str(t), {})[str(k)] = {
-                "time_to_threshold": tth,
+                "time_from_onset": tth,
                 "time_abs": tabs,
                 "position": pos,
             }
@@ -1274,7 +1274,7 @@ class WOOTING_ACQUISITION:
             callback_deadline_perf_ns = int(trial_start_perf_ns + callback_delay * 1e9)
 
         self._last_trial_start_perf_ns = int(trial_start_perf_ns)
-        self._last_stim_on_clock = str(trial_start_clock)
+        self._last_trial_start_clock = str(trial_start_clock)
         self._last_threshold_time = None
         self._last_threshold_key = None
 
@@ -1399,7 +1399,7 @@ class WOOTING_ACQUISITION:
         ------------------
         Internally, samples are timestamped with `time.perf_counter_ns()` (high-resolution,
         monotonic). If you provide `trial_start_ns` (typically stimulus onset), it is
-        used as the reference to compute `time_to_threshold` (seconds since onset).
+        used as the reference to compute `time_from_onset` (seconds since onset).
 
         Optional timed callback
         -----------------------
@@ -1458,11 +1458,13 @@ class WOOTING_ACQUISITION:
         -------
         hier : dict
             Hierarchical structure containing analog trajectories for each target key:
-                hier[trial_id][keycode]['time_to_threshold']  (seconds since trial_start_ns)
+                hier[trial_id][keycode]['time_from_onset']  (seconds since trial_start_ns)
                 hier[trial_id][keycode]['time_abs']           (seconds since epoch)
                 hier[trial_id][keycode]['position']           (float in [0, 1])
             
-            Note: 'time_to_threshold' is a misnomer - it's actually "time since trial_start_ns".
+            'time_from_onset' is seconds since trial_start_ns; the threshold crossing
+            is recorded in the trial attribute 'threshold_time', so a threshold-relative
+            time is 'time_from_onset - threshold_time'.
             When duration_before_threshold=None, all samples before threshold are included,
             so times will be positive both before and after threshold crossing.
 
@@ -1559,7 +1561,8 @@ class WOOTING_ACQUISITION:
         hier : dict
             Same hierarchical structure, but `position` arrays are integers in [0, 255].
             
-            Note: 'time_to_threshold' is actually "time since trial_start_ns".
+            'time_from_onset' is seconds since trial_start_ns (the threshold crossing is
+            recorded in the 'threshold_time' trial attribute).
             When duration_before_threshold=None, all samples before threshold are included.
 
         (hier, quit_pressed) : tuple
@@ -2034,7 +2037,7 @@ def load_trial(hdf5_path: str, trial_id: Union[int, str]) -> Dict[str, Any]:
             {
                 "0006": {
                     "position":          np.ndarray,  # (N,) float64
-                    "time_to_threshold": np.ndarray,  # (N,) float64
+                    "time_from_onset": np.ndarray,  # (N,) float64
                     "time_abs":          np.ndarray,  # (N,) float64
                 },
                 "_attrs": {"threshold": 0.8, "backend": "read_full_buffer", ...},
@@ -2068,6 +2071,9 @@ def load_trial(hdf5_path: str, trial_id: Union[int, str]) -> Dict[str, Any]:
         attrs: Dict[str, Any] = {}
         for k, v in g_trial.attrs.items():
             attrs[k] = v.decode() if isinstance(v, (bytes, np.bytes_)) else v
+        # Backward compatibility: older logs named this attribute "stim_on_clock".
+        if "stim_on_clock" in attrs and "trial_start_clock" not in attrs:
+            attrs["trial_start_clock"] = attrs.pop("stim_on_clock")
 
         result: Dict[str, Any] = {}
         g_keys = g_trial.get("keys")
@@ -2075,10 +2081,10 @@ def load_trial(hdf5_path: str, trial_id: Union[int, str]) -> Dict[str, Any]:
             for key_name, g_key in g_keys.items():
                 if "values" not in g_key:
                     continue
-                data = g_key["values"][()]  # (N, 3): position, time_to_threshold, time_abs
+                data = g_key["values"][()]  # (N, 3): position, time_from_onset, time_abs
                 result[key_name] = {
                     "position": data[:, 0],
-                    "time_to_threshold": data[:, 1],
+                    "time_from_onset": data[:, 1],
                     "time_abs": data[:, 2],
                 }
 
@@ -2098,7 +2104,7 @@ def trial_to_dataframe(trial_data: Dict[str, Any]) -> "Any":
     -------
     pd.DataFrame
         Long-format frame with columns ``key``, ``position``,
-        ``time_to_threshold``, and ``time_abs``. One row per sample per key.
+        ``time_from_onset``, and ``time_abs``. One row per sample per key.
 
     Raises
     ------
@@ -2110,7 +2116,7 @@ def trial_to_dataframe(trial_data: Dict[str, Any]) -> "Any":
     >>> trial = load_trial("session.hdf5", 1)
     >>> df = trial_to_dataframe(trial)
     >>> df.head()
-       key  position  time_to_threshold    time_abs
+       key  position  time_from_onset    time_abs
     0  0006      0.00          -0.200        ...
     """
     try:
@@ -2124,14 +2130,14 @@ def trial_to_dataframe(trial_data: Dict[str, Any]) -> "Any":
             continue
         df = pd.DataFrame({
             "position": series["position"],
-            "time_to_threshold": series["time_to_threshold"],
+            "time_from_onset": series["time_from_onset"],
             "time_abs": series["time_abs"],
         })
         df.insert(0, "key", key_name)
         frames.append(df)
 
     if not frames:
-        return pd.DataFrame(columns=["key", "position", "time_to_threshold", "time_abs"])
+        return pd.DataFrame(columns=["key", "position", "time_from_onset", "time_abs"])
     return pd.concat(frames, ignore_index=True)
 
 
@@ -2159,7 +2165,7 @@ def load_session(hdf5_path: str, include_attrs: bool = True) -> "Any":
         - ``trial`` (int) — trial number
         - ``key`` (str) — zero-padded keycode, e.g. ``"0006"``
         - ``position`` (float) — analog pressure in ``[0, 1]``
-        - ``time_to_threshold`` (float) — seconds since ``trial_start_ns``
+        - ``time_from_onset`` (float) — seconds since ``trial_start_ns``
         - ``time_abs`` (float) — seconds since Unix epoch
 
         When ``include_attrs=True``, additional columns from each trial's HDF5
@@ -2177,7 +2183,7 @@ def load_session(hdf5_path: str, include_attrs: bool = True) -> "Any":
     --------
     >>> df = load_session("session.hdf5")
     >>> df.groupby("trial")["position"].max()
-    >>> df[df["key"] == "0006"].plot(x="time_to_threshold", y="position")
+    >>> df[df["key"] == "0006"].plot(x="time_from_onset", y="position")
     """
     try:
         import pandas as pd
@@ -2197,6 +2203,9 @@ def load_session(hdf5_path: str, include_attrs: bool = True) -> "Any":
             if include_attrs:
                 for k, v in g_trial.attrs.items():
                     attrs[k] = v.decode() if isinstance(v, (bytes, np.bytes_)) else v
+                # Backward compatibility: older logs named this attribute "stim_on_clock".
+                if "stim_on_clock" in attrs and "trial_start_clock" not in attrs:
+                    attrs["trial_start_clock"] = attrs.pop("stim_on_clock")
 
             g_keys = g_trial.get("keys")
             if g_keys is None:
@@ -2205,10 +2214,10 @@ def load_session(hdf5_path: str, include_attrs: bool = True) -> "Any":
             for key_name, g_key in g_keys.items():
                 if "values" not in g_key:
                     continue
-                data = g_key["values"][()]  # (N, 3): position, time_to_threshold, time_abs
+                data = g_key["values"][()]  # (N, 3): position, time_from_onset, time_abs
                 df = pd.DataFrame({
                     "position": data[:, 0],
-                    "time_to_threshold": data[:, 1],
+                    "time_from_onset": data[:, 1],
                     "time_abs": data[:, 2],
                 })
                 df.insert(0, "key", key_name)
@@ -2219,5 +2228,5 @@ def load_session(hdf5_path: str, include_attrs: bool = True) -> "Any":
                 frames.append(df)
 
     if not frames:
-        return pd.DataFrame(columns=["trial", "key", "position", "time_to_threshold", "time_abs"])
+        return pd.DataFrame(columns=["trial", "key", "position", "time_from_onset", "time_abs"])
     return pd.concat(frames, ignore_index=True)

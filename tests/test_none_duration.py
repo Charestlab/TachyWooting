@@ -50,13 +50,13 @@ def main():
     if trial_id in data and key_id in data[trial_id]:
         serie = data[trial_id][key_id]
         n_samples = len(serie['position'])
-        time_to_threshold = serie['time_to_threshold']
+        time_from_onset = serie['time_from_onset']
         position = serie['position']
         
         print(f"\n[5] Data summary:")
         print(f"    Total samples: {n_samples}")
-        print(f"    Time span: {time_to_threshold[0]:.4f}s to {time_to_threshold[-1]:.4f}s")
-        print(f"    Duration before threshold: {abs(time_to_threshold[0]):.4f}s")
+        print(f"    Time span: {time_from_onset[0]:.4f}s to {time_from_onset[-1]:.4f}s")
+        print(f"    Duration before threshold: {abs(time_from_onset[0]):.4f}s")
         print(f"    Position range: [{position.min():.3f}, {position.max():.3f}]")
         
         # Find threshold crossing
@@ -73,7 +73,7 @@ def main():
         
         print(f"\n[6] First 10 samples:")
         for i in range(min(10, n_samples)):
-            print(f"    [{i:3d}] t={time_to_threshold[i]:8.4f}s  pos={position[i]:.4f}")
+            print(f"    [{i:3d}] t={time_from_onset[i]:8.4f}s  pos={position[i]:.4f}")
         
         if n_samples > 10:
             print(f"    ... ({n_samples - 10} more samples)")

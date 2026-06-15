@@ -1,43 +1,38 @@
-"""Sphinx configuration for the Wooting Analog documentation."""
+"""Sphinx configuration for TachyWooting docs."""
 
-from __future__ import annotations
-
+from pathlib import Path
 import os
 import sys
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 project = "TachyWooting"
-author = "Mathias Salvas-Hébert, Guillaume Lalonde-Beaudoin"
-copyright = "2026, Mathias Salvas-Hébert, Guillaume Lalonde-Beaudoin"
-
+author = "Mathias Salvas-Hébert"
 extensions = [
-    "myst_parser",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
-    "sphinx.ext.viewcode",
 ]
-
 autosummary_generate = True
-autodoc_typehints = "description"
-autodoc_member_order = "bysource"
-napoleon_google_docstring = False
-napoleon_numpy_docstring = True
-napoleon_use_param = True
-napoleon_use_rtype = True
-suppress_warnings = ["myst.xref_missing"]
-
+autodoc_mock_imports = [
+    "h5py",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "rich",
+    "tqdm",
+]
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
-
-html_theme = "sphinx_rtd_theme"
-html_theme_options = {
-    "collapse_navigation": False,
-    "navigation_depth": 4,
-}
+exclude_patterns = ["_build"]
+html_theme = "furo"
+html_title = "TachyWooting"
 html_static_path = ["_static"]
+html_theme_options = {
+    "sidebar_hide_name": False,
+    "source_repository": "https://github.com/Charestlab/TachyWooting/",
+    "source_branch": "main",
+    "source_directory": "docs/",
+}
 
 os.environ.setdefault("WOOTING_DOCS_BUILD", "1")
