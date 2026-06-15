@@ -1,6 +1,6 @@
 # Development Guide
 
-This document is a maintainer guide for the `tachywooting` project.
+This document is a maintainer guide for the TachyWooting project.
 
 ## 1) Development Setup
 

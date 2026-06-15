@@ -2,7 +2,7 @@
 
 ## Overview
 
-`tachywooting` provides a Python interface for the Wooting Analog SDK. It exposes high-level acquisition helpers for analog keyboard experiments while keeping the raw CFFI `lib` and `ffi` handles available for advanced SDK access.
+TachyWooting provides a Python interface for the Wooting Analog SDK. It exposes high-level acquisition helpers for analog keyboard experiments while keeping the raw CFFI `lib` and `ffi` handles available for advanced SDK access.
 
 ## Installation Behavior
 

@@ -1,6 +1,6 @@
 # Raw SDK Access via `lib` and `ffi`
 
-`tachywooting` exposes two CFFI handles at the top level:
+TachyWooting exposes two CFFI handles at the top level:
 
 ```python
 from tachywooting import lib, ffi
