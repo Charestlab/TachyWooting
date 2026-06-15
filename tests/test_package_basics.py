@@ -41,6 +41,17 @@ def test_interface_console_scripts_target_package_setup():
     )
 
 
+def test_package_does_not_expose_tachypy_feedback_extra_or_scripts():
+    pyproject_text = open("pyproject.toml", encoding="utf-8").read()
+
+    assert "[project.optional-dependencies]" in pyproject_text
+    assert "tachywooting[tachypy]" not in pyproject_text
+    assert "tachypy>=" not in pyproject_text
+    assert "wooting-visual-fixation-demo" not in pyproject_text
+    assert "wooting-mini-bw-experiment" not in pyproject_text
+    assert not hasattr(WOOTING_ACQUISITION, "wait_light_press_visual")
+
+
 def test_run_post_install_calls_setup_steps_in_order(monkeypatch):
     calls = []
 

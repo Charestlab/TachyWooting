@@ -24,30 +24,48 @@ IMPORTANT NOTE ABOUT "CLEARING" BUFFERS:
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import glob
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple, Union, Literal, Set
-
-if TYPE_CHECKING:
-    from tachypy import ResponseHandler, Screen, FixationCross
-
-
-class _Drawable(Protocol):
-    def draw(self) -> None: ...
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, Literal, Set
 
 import h5py
 import numpy as np
 
-from tachywooting.interface import MISSING_INTERFACE_MESSAGE, lib, ffi
-from tachywooting.feedback import PressureFeedbackConfig, PressureFeedbackState
+from tachywooting.interface import MISSING_INTERFACE_MESSAGE, NO_DEVICE_MESSAGE, lib, ffi
 
 _log = logging.getLogger(__name__)
 
 
 def _require_native_interface() -> None:
-    """Fail only when native SDK access is actually needed."""
+    """Ensure the compiled Wooting CFFI interface is loaded.
+
+    Called the first time native SDK access is needed (acquisition construction
+    and ``initialize_keyboard``). If the compiled interface is missing, it is
+    built automatically once — this step needs only a C compiler, no admin
+    privileges. If it still cannot be loaded afterwards, a clear, actionable
+    error pointing to ``wooting-build-interface`` is raised.
+    """
+    global lib, ffi
+    if lib is not None and ffi is not None:
+        return
+
+    # One-time, privilege-free auto-build of the CFFI module on first use.
+    try:
+        from tachywooting.package_setup import build_interface_if_needed
+        build_interface_if_needed()
+    except Exception:
+        _log.debug("Automatic CFFI build failed; surfacing setup instructions.", exc_info=True)
+
+    # Re-load the interface now that the compiled module may exist, and rebind
+    # the module-level handles used throughout this file.
+    from tachywooting import interface as _interface
+    importlib.reload(_interface)
+    lib = _interface.lib
+    ffi = _interface.ffi
+
     if lib is None or ffi is None:
         raise RuntimeError(MISSING_INTERFACE_MESSAGE)
 
@@ -464,7 +482,7 @@ class WOOTING_ACQUISITION:
         reaches or exceeds this value during acquisition. You can change it after init.
 
     min_pressure_start : float
-        Lower bound for light-press readiness checks and visual pressure feedback.
+        Lower bound for light-press readiness checks.
 
     max_pressure_start : float
         Upper bound for “light press” readiness checks (see wait_keys_light_press). Must be
@@ -824,9 +842,9 @@ class WOOTING_ACQUISITION:
         _require_native_interface()
         device_count = int(lib.wooting_analog_initialise())
         if device_count <= 0:
-            raise RuntimeError("No Wooting devices found or failed to initialize.")
+            raise RuntimeError(NO_DEVICE_MESSAGE)
         if not lib.wooting_analog_is_initialised():
-            raise RuntimeError("Wooting SDK reports not initialised after initialise().")
+            raise RuntimeError(NO_DEVICE_MESSAGE)
 
         n = max(device_count, 1)
         buffer = ffi.new("WootingAnalog_DeviceInfo_FFI *[]", n)
@@ -1786,224 +1804,6 @@ class WOOTING_ACQUISITION:
 
             self._wait_until_next_tick(next_t)
 
-    def wait_keys_light_press_visual(
-        self,
-        target_keys: Sequence[str | int],
-        screen: Screen,
-        response_handler: ResponseHandler | None = None,
-        fixation_cross: FixationCross | None = None,
-        overlay_drawables: Sequence[_Drawable] | None = None,
-        # ── timing ──────────────────────────────────────────────────────────
-        hold_seconds: float | None = None,
-        timeout_seconds: float | None = None,
-        # ── appearance ──────────────────────────────────────────────────────
-        background_color: tuple[int, int, int] = (128, 128, 128),
-        initial_color: tuple[int, int, int] | None = None,
-        show_pressure_text: bool | None = None,
-        show_goal_markers: bool | None = None,
-        # ── behaviour ───────────────────────────────────────────────────────
-        exit_keys: Sequence[str] = ("escape", "esc", "enter", "return", "space", "q"),
-        # ── others ──────────────────────────────────────────────────────────
-        widget: Any | None = None,
-        verbose: bool = False,
-    ) -> bool:
-        """
-        Wait for two keys to stay in the light-press range while showing visual feedback.
-
-        Parameters
-        ----------
-        target_keys : sequence of str or int
-            Exactly two keys. The first controls the left side of the widget,
-            the second the right side.
-
-        screen : TachyPy Screen object
-            TachyPy `Screen`-like object. Must expose `flip()`. If it exposes
-            `fill(color)`, the screen is cleared with `background_color` each frame.
-
-        response_handler : TachyPy ResponseHandler, optional
-            When provided, quit requests and `exit_keys` presses return `False`.
-
-        fixation_cross : TachyPy FixationCross, optional
-            Existing TachyPy `FixationCross`. The auto-created widget copies
-            `center`, `half_width`, `half_height`, `thickness`, and `color`
-            (→ target color + vertical line color) from it. Invalid with `widget`.
-
-        overlay_drawables : sequence, optional
-            Objects with a `.draw()` method called every frame after the widget
-            and before `screen.flip()`. Use to overlay static tachypy `Text`
-            objects without interrupting the pressure loop.
-
-        hold_seconds : float, optional
-            Required continuous hold duration in seconds. Defaults to
-            `self.hold_seconds`.
-
-        timeout_seconds : float, optional
-            Maximum wait time. Raises `TimeoutError` if exceeded.
-
-        background_color : tuple[int, int, int], default=(128, 128, 128)
-            RGB color used to clear the screen each frame.
-
-        initial_color : tuple[int, int, int], optional
-            Starting color of the horizontal bar at zero hold progress.
-            Defaults to `(100, 100, 100)`. Invalid with `widget`.
-
-        show_pressure_text : bool, optional
-            Show real-time pressure values (e.g. `"0.45"`) above the cross for
-            keys outside the acceptable range. Defaults to `False`. Invalid
-            with `widget`.
-
-        exit_keys : sequence of str, default=("escape", "esc", "enter", "return", "space", "q")
-            Keys that abort the wait when `response_handler` is active.
-
-        widget : PressureFeedbackWidget, optional
-            Full custom widget override. When provided, `fixation_cross`,
-            `initial_color`, and `show_pressure_text` are invalid.
-
-        verbose : bool, default=False
-            Print a message when the hold condition is satisfied.
-
-        Returns
-        -------
-        bool
-            `True` when both keys were held in range for `hold_seconds`.
-            `False` when the user exits via `response_handler`.
-
-        Raises
-        ------
-        ValueError
-            Invalid arguments or incompatible parameter combinations.
-        TimeoutError
-            `timeout_seconds` exceeded before readiness.
-        RuntimeError
-            TachyPy is required but not installed.
-
-        Examples
-        --------
-        Minimal:
-
-        >>> acq.wait_keys_light_press_visual(target_keys=["c", "z"], screen=screen)
-
-        With an existing fixation cross (geometry and color copied automatically):
-
-        >>> acq.wait_keys_light_press_visual(
-        ...     target_keys=["c", "z"],
-        ...     screen=screen,
-        ...     response_handler=rh,
-        ...     fixation_cross=fixation,
-        ... )
-
-        With a fully custom widget:
-
-        >>> widget = TachyPyInteractiveFixationCross(screen=screen, acquisition=acq)
-        >>> acq.wait_keys_light_press_visual(
-        ...     target_keys=["c", "z"],
-        ...     screen=screen,
-        ...     widget=widget,
-        ... )
-        """
-        if not getattr(self, "initialized", False):
-            raise ValueError('Keyboard must be initialized through "initialize_keyboard()".')
-        hold_seconds = self.hold_seconds if hold_seconds is None else float(hold_seconds)
-        if hold_seconds <= 0:
-            raise ValueError("hold_seconds must be > 0")
-        if timeout_seconds is not None and timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be > 0 if provided")
-
-        target_keys = list(target_keys)
-        target_codes = self._to_keycodes(target_keys)
-        if len(target_codes) != 2:
-            raise ValueError("wait_keys_light_press_visual requires exactly two target keys")
-
-        if widget is not None:
-            conflicting_widget_args = [
-                name for name, value in (
-                    ("fixation_cross", fixation_cross),
-                    ("initial_color", initial_color),
-                    ("show_pressure_text", show_pressure_text),
-                    ("show_goal_markers", show_goal_markers),
-                )
-                if value is not None
-            ]
-            if conflicting_widget_args:
-                names = ", ".join(conflicting_widget_args)
-                raise ValueError(
-                    "Do not pass auto-widget configuration arguments when `widget` is provided: "
-                    f"{names}. Configure the widget directly instead."
-                )
-
-        exit_key_set = {str(key).lower() for key in exit_keys}
-        if response_handler is not None and hasattr(response_handler, "keys_to_listen"):
-            response_handler.keys_to_listen = sorted(exit_key_set)
-            if hasattr(response_handler, "_probed_keys"):
-                response_handler._probed_keys.update(exit_key_set)
-
-        if widget is None:
-            try:
-                from tachywooting.feedback.tachypy_widget import TachyPyInteractiveFixationCross
-            except ImportError as exc:
-                raise RuntimeError('Install TachyPy support with: pip install ".[tachypy]"') from exc
-            widget = TachyPyInteractiveFixationCross(
-                screen=screen,
-                fixation_cross=fixation_cross,
-                background_color=background_color,
-                initial_color=(100, 100, 100) if initial_color is None else initial_color,
-                acquisition=self,
-                show_pressure_text=False if show_pressure_text is None else show_pressure_text,
-                show_goal_markers=False if show_goal_markers is None else show_goal_markers,
-            )
-        state = PressureFeedbackState(
-            PressureFeedbackConfig(
-                min_pressure_start=self.min_pressure_start,
-                max_pressure_start=self.max_pressure_start,
-                threshold=self.threshold,
-                hold_seconds=hold_seconds,
-            )
-        )
-
-        interval = 1.0 / 1000.0
-        next_t = time.perf_counter()
-        deadline = None if timeout_seconds is None else next_t + timeout_seconds
-
-        while True:
-            now = time.perf_counter()
-            if deadline is not None and now >= deadline:
-                raise TimeoutError("wait_keys_light_press_visual: timeout exceeded")
-            if self._visual_exit_requested(response_handler, exit_key_set):
-                return False
-
-            frame_background_color = background_color() if callable(background_color) else background_color
-            if hasattr(screen, "fill"):
-                screen.fill(frame_background_color)
-
-            pos_map = self._read_positions_for_targets(target_codes)
-            state.update(
-                left_pressure=float(pos_map.get(int(target_codes[0]), 0.0)),
-                right_pressure=float(pos_map.get(int(target_codes[1]), 0.0)),
-                now=now,
-            )
-
-            widget.update(state)
-            widget.draw()
-            if overlay_drawables:
-                for drawable in overlay_drawables:
-                    drawable.draw()
-
-            if not hasattr(screen, "flip"):
-                raise AttributeError("screen must expose flip()")
-            screen.flip()
-
-            if state.is_ready:
-                if verbose:
-                    _log.debug("[wait_keys_light_press_visual] condition satisfied.")
-                return True
-
-            next_t += interval
-            now2 = time.perf_counter()
-            if next_t < (now2 - 0.10):
-                next_t = now2 + interval
-
-            self._wait_until_next_tick(next_t)
-
     @staticmethod
     def _visual_exit_requested(response_handler, exit_keys: set[str]) -> bool:
         if response_handler is None:
@@ -2026,7 +1826,7 @@ class WOOTING_ACQUISITION:
         hold_seconds: float = 0.30,
         timeout_seconds: float | None = None,
         release_max: float = 0.01,
-        response_handler: ResponseHandler | None = None,
+        response_handler: Any | None = None,
         exit_keys: Sequence[str] = ("escape", "esc", "enter", "return", "space", "q"),
         on_tick: Callable[[], None] | None = None,
         verbose: bool = False,

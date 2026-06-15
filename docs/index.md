@@ -1,7 +1,9 @@
 # Wooting Analog
 
-Python tools for Wooting analog keyboard acquisition, readiness checks,
-finger-removal tracking, logging, and optional TachyPy visual feedback.
+Python tools for Wooting analog keyboard acquisition, light-press / release
+readiness checks, finger-removal tracking, and hierarchical HDF5 logging.
+
+On-screen visual feedback lives in TachyPy (`pip install tachypy[wooting]`).
 
 ```{toctree}
 :maxdepth: 2

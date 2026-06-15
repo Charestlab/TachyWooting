@@ -46,32 +46,28 @@ Console scripts are documented in [docs/scripts.md](docs/scripts.md).
 pip install .
 ```
 
-### What Happens During Installation
+### What setup is needed
 
-The installation automatically handles:
+`pip install` does **not** run system setup — pip installs from wheels, which have
+no reliable post-install hook. Setup is split into two parts:
 
-1. **CFFI Compilation** - Builds Python bindings for the Wooting SDK
-2. **Permission Setup** (Linux/macOS) - Configures udev rules/Gatekeeper
-3. **Plugin Installation** - Deploys SDK and plugins to system directories
+1. **CFFI compilation** happens **automatically the first time** you create a
+   `WOOTING_ACQUISITION` (or run `wooting-demo`). It needs only a C compiler —
+   no admin rights.
+2. **SDK plugins + input permissions** require a **one-time privileged step**:
 
-On first use (e.g., `wooting-demo`), the package automatically:
-- Sets up Linux permissions if needed
-- Compiles the CFFI interface
-- Installs SDK and plugins to system directories
+   ```bash
+   wooting-build-interface   # installs SDK plugins + permissions (needs sudo/admin)
+   ```
 
-**Note**: Steps 2-3 require `sudo`/admin privileges.
+If the keyboard is not detected, the error message tells you exactly to run this
+command — you do not have to remember it. To undo it later: `wooting-delete-interface`.
 
 ### Development Installation
 
 ```bash
 python -m pip install -e ".[dev]"
 wooting-build-interface
-```
-
-For visual TachyPy feedback support:
-
-```bash
-python -m pip install -e ".[tachypy]"
 ```
 
 ## Quick Start
@@ -95,17 +91,15 @@ finally:
 wooting-demo --key A --threshold 50
 ```
 
-## Visual Readiness Feedback
+## Visual feedback (TachyPy)
+
+On-screen pressure feedback — the interactive fixation cross and
+`wait_light_press_visual()` — lives in **TachyPy**, not in this hardware package.
+Install it with `pip install 'tachypy[wooting]'`, then:
 
 ```python
-acq.wait_keys_light_press_visual(
-    screen=screen,
-    response_handler=response_handler,
-    target_keys=["c", "z"],
-)
+from tachypy import WOOTING_ACQUISITION  # keyboard + visual feedback
 ```
-
-![Visual light-press readiness feedback](repo_visuals/gifs/wooting-mini-bw-experiment.gif)
 
 ## HDF5 Logging
 

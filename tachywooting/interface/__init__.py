@@ -10,13 +10,43 @@ from pathlib import Path
 #os.environ.setdefault("RUST_LOG", "off")
 
 MISSING_INTERFACE_MESSAGE = """
-The Wooting native interface has not been built yet.
+══════════════════════════════════════════════════════════════════════
+ Wooting keyboard support is not ready yet
+══════════════════════════════════════════════════════════════════════
 
-Run this command once from your terminal:
+The native Wooting interface could not be loaded. The package tried to
+build it automatically and could not finish the one-time setup — this
+usually means the build needs a C compiler, or the SDK plugins and the
+permissions required to read analog key input are not installed yet.
 
-    wooting-build-interface
+▶ Run this once from your terminal:
 
-Then run your Python script again.
+      wooting-build-interface
+
+  It compiles the native interface, installs the Wooting SDK + analog
+  plugins (this part needs admin / sudo), and grants the input
+  permissions. Then re-run your script.
+
+  To undo it later:  wooting-delete-interface
+══════════════════════════════════════════════════════════════════════
+""".strip()
+
+NO_DEVICE_MESSAGE = """
+══════════════════════════════════════════════════════════════════════
+ No Wooting device detected
+══════════════════════════════════════════════════════════════════════
+
+The native interface loaded, but the SDK found no analog keyboard.
+
+  1. Make sure a Wooting keyboard is plugged in (try another cable/port).
+  2. If it is connected, the SDK plugins or input permissions are likely
+     missing. Run this once from your terminal:
+
+         wooting-build-interface
+
+     (installs the SDK + analog plugins and the required permissions;
+      needs admin / sudo). Then re-run your script.
+══════════════════════════════════════════════════════════════════════
 """.strip()
 
 try:
@@ -34,4 +64,4 @@ except (ModuleNotFoundError, ImportError, OSError):
     lib = None
     ffi = None
 
-__all__ = ["MISSING_INTERFACE_MESSAGE", "lib", "ffi"]
+__all__ = ["MISSING_INTERFACE_MESSAGE", "NO_DEVICE_MESSAGE", "lib", "ffi"]

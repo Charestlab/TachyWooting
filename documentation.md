@@ -16,16 +16,10 @@ During installation, setuptools builds the CFFI extension from the bundled Wooti
 wooting-build-interface
 ```
 
-Editable development installs include all optional dependencies (CLI, visualization, TachyPy, and docs):
+Editable development installs include all optional dependencies (CLI, visualization, and docs):
 
 ```bash
 python -m pip install -e ".[dev]"
-```
-
-For visual TachyPy feedback support:
-
-```bash
-python -m pip install -e ".[tachypy]"
 ```
 
 ## Project Structure
@@ -262,72 +256,26 @@ tracker.reached_total_removal_limit(n=5)
 
 For multi-key acquisition, `read_full_buffer` keeps only requested target keys. If a target key is absent from the SDK buffer at a given tick, the package records it as `position=0.0`.
 
-## Pressure Feedback
+## Light-press readiness
 
-Pressure feedback is split into pure logic and optional rendering.
-
-Pure feedback classes:
-
-```python
-from tachywooting.feedback import PressureFeedbackConfig, PressureFeedbackState
-
-state = PressureFeedbackState(
-    PressureFeedbackConfig(
-        min_pressure_start=0.01,
-        max_pressure_start=0.35,
-        threshold=0.8,
-        hold_seconds=0.30,
-    )
-)
-state.update(left_pressure=0.1, right_pressure=0.2, now=0.0)
-```
-
-TachyPy visual feedback:
+`wait_keys_light_press()` blocks until every target key is held within the
+light-press interval (`min_pressure_start` … `max_pressure_start`) for
+`hold_seconds`, then returns. It needs no display:
 
 ```python
-acq.wait_keys_light_press_visual(
-    screen=screen,
-    response_handler=response_handler,
-    target_keys=["c", "z"],
-)
-
-# Reuse an existing TachyPy FixationCross when you already have one.
-acq.wait_keys_light_press_visual(
-    screen=screen,
-    response_handler=response_handler,
-    target_keys=["c", "z"],
-    fixation_cross=fixation,
-)
+acq.wait_keys_light_press(target_keys=["c", "z"], quit_key="q")
 ```
 
-Advanced custom widget:
+On-screen visual feedback — the interactive fixation cross,
+`wait_light_press_visual()`, pressure text, and custom feedback widgets — lives
+in **TachyPy**, not in this hardware package. Install `tachypy[wooting]` and use
+the enriched acquisition class:
 
 ```python
-from tachywooting.feedback.tachypy_widget import TachyPyInteractiveFixationCross
+from tachypy import WOOTING_ACQUISITION
 
-widget = TachyPyInteractiveFixationCross(screen=screen, acquisition=acq)
-acq.wait_keys_light_press_visual(
-    screen=screen,
-    target_keys=["c", "z"],
-    widget=widget,
-    response_handler=response_handler,
-)
+acq.wait_light_press_visual(screen=screen, target_keys=["c", "z"])
 ```
-
-Visual pressure text is enabled by default in `wait_keys_light_press_visual()`;
-labels are inferred from `target_keys`. Text is shown only for keys outside the
-acceptable pressure interval. Text size is derived from the fixation cross size
-unless a specific `pressure_text_font_size` is provided on a custom widget.
-
-Scaling defaults:
-
-```text
-min_scale = 0.25
-normal_scale = 1.0
-max_scale = 2.0
-```
-
-If pressure is exactly `0`, the corresponding horizontal side is not drawn. If pressure is below `min_pressure_start` but above `0`, the side shrinks. If pressure is above `max_pressure_start`, it extends. If pressure is in range, scale stays at `1.0`.
 
 ## Timing Modes
 

@@ -1,14 +1,16 @@
 """Python interface for Wooting analog keyboards.
 
-The package exposes acquisition, logging, readiness checks, and optional visual
-pressure feedback for Wooting keyboards.
+The package exposes analog acquisition, hierarchical HDF5 logging, and
+light-press / release readiness checks for Wooting keyboards.
+
+On-screen visual feedback (the interactive fixation cross, ``wait_light_press_visual``)
+lives in TachyPy and is available via ``pip install tachypy[wooting]`` — it is not
+part of this hardware-focused package.
 
 See Also
 --------
 WOOTING_ACQUISITION
     Main acquisition class.
-tachywooting.feedback
-    Pure pressure-feedback state and rendering widget interfaces.
 """
 from importlib.metadata import PackageNotFoundError, version
 

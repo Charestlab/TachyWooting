@@ -13,15 +13,14 @@ acq = WOOTING_ACQUISITION(
 acq.initialize_keyboard(verbose=True)
 ```
 
-## Visual Readiness Feedback
+## Light-press readiness
 
 ```python
-acq.wait_keys_light_press_visual(
-    screen=screen,
-    response_handler=response_handler,
-    target_keys=["z", "c"],
-)
+acq.wait_keys_light_press(target_keys=["z", "c"], quit_key="q")
 ```
+
+On-screen visual feedback (`wait_light_press_visual`) is provided by TachyPy —
+install `tachypy[wooting]` and use `from tachypy import WOOTING_ACQUISITION`.
 
 ## Acquisition
 

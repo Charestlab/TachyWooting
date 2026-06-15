@@ -17,12 +17,6 @@ python -m pip install -e ".[dev]"
 wooting-build-interface
 ```
 
-Optional for TachyPy demos:
-
-```bash
-python -m pip install -e ".[tachypy]"
-```
-
 ## 2) `update-wooting-sdk` Workflow
 
 The GitHub Actions workflow `update-wooting-sdk` updates vendored SDK assets under

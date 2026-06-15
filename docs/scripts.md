@@ -63,93 +63,24 @@ wooting-build-interface
 
 Use this when you want to force a clean rebuild of the native interface.
 
-## `wooting-visual-fixation-demo`
+## `wooting-visualize`
 
 Entry point:
 
 ```toml
-wooting-visual-fixation-demo = "tachywooting.demos.visual_fixation_demo:main"
+wooting-visualize = "tachywooting.visualize:main"
 ```
 
-Runs the TachyPy visual readiness demo with the interactive fixation cross.
+Plots logged analog pressure traces from an HDF5 session file (matplotlib).
 
-![Wooting visual fixation demo](../repo_visuals/gifs/wooting-visual-fixation-demo.gif)
+## Visual demos (TachyPy)
 
-Default behavior:
-
-- Opens in a 1502x750 window by default.
-- Uses `z` as the left key and `c` as the right key.
-- Shows real-time pressure feedback.
-- Tracks hits, elapsed time, and efficiency.
-- Flashes the background green after a successful hit.
-- Waits for keys to be released before counting another hit.
-- Exits with `Escape`, `Enter`, `Space`, or `q`.
-
-Typical use:
+The interactive fixation-cross demo and the mini black/white experiment now ship
+with **TachyPy** — they require a display and the visual feedback engine, so they
+are not part of this hardware package. Install `tachypy[wooting]` to get them:
 
 ```bash
-wooting-visual-fixation-demo
-```
-
-Install TachyPy support first:
-
-```bash
-python -m pip install ".[tachypy]"
-```
-
-Useful options:
-
-```bash
-wooting-visual-fixation-demo \
-  --left-key z \
-  --right-key c \
-  --min-pressure 0.33 \
-  --max-pressure 0.66 \
-  --hold-seconds 0.30
-```
-
-Use `--fullscreen` only when you explicitly want TachyPy fullscreen mode:
-
-```bash
-wooting-visual-fixation-demo --fullscreen --screen-number 0
-```
-
-## `wooting-mini-bw-experiment`
-
-Entry point:
-
-```toml
-wooting-mini-bw-experiment = "tachywooting.demos.mini_bw_experiment:main"
-```
-
-Runs a no-file TachyPy mini-experiment for testing response trials and finger-removal tracking.
-
-![Wooting mini black-white experiment](../repo_visuals/gifs/wooting-mini-bw-experiment.gif)
-
-Default behavior:
-
-- Generates black and white image stimuli from `np.zeros(...)` and `np.ones(...)`.
-- Uses `z` as the yes response and `c` as the no response.
-- Asks whether the image is white.
-- Uses visual light-press readiness before each trial.
-- Tracks finger-removal trials in memory only.
-- Flags the participant when finger removals occur for 2 consecutive trials.
-- Exits with `Escape`, `Enter`, `Space`, or `q`.
-
-Typical use:
-
-```bash
-wooting-mini-bw-experiment
-```
-
-Useful options:
-
-```bash
-wooting-mini-bw-experiment \
-  --trials 30 \
-  --yes-key z \
-  --no-key c \
-  --min-pressure 0.33 \
-  --max-pressure 0.66 \
-  --removal-streak-limit 2
+pip install 'tachypy[wooting]'
+tachypy-wooting-fixation-demo
+tachypy-wooting-mini-bw
 ```

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tachywooting"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python interface for Wooting analog keyboards"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,9 +42,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-tachypy = [
-    "tachypy>=0.1.16",
-]
 docs = [
     "myst-parser>=2.0.0",
     "sphinx>=7.0.0",
@@ -60,10 +57,9 @@ dev = [
     "sphinx>=7.0.0",
     "sphinx-rtd-theme>=2.0.0",
     "twine>=5.0.0",
-    "tachywooting[tachypy]",
 ]
 all = [
-    "tachywooting[tachypy,dev]",
+    "tachywooting[dev]",
 ]
 
 [tool.setuptools.packages.find]
@@ -80,8 +76,6 @@ tachywooting = [
 wooting-demo = "tachywooting.demos.cli:main"
 wooting-build-interface = "tachywooting.package_setup:run_post_install"
 wooting-delete-interface = "tachywooting.package_setup:main_delete_interface"
-wooting-visual-fixation-demo = "tachywooting.demos.visual_fixation_demo:main"
-wooting-mini-bw-experiment = "tachywooting.demos.mini_bw_experiment:main"
 wooting-visualize = "tachywooting.visualize:main"
 
 [tool.pytest.ini_options]
