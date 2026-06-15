@@ -58,6 +58,14 @@ KNOWN_SHA256 = {
 }
 
 
+EXCLUDED_TOP_LEVEL_ASSETS = {
+    "debug",
+    "VIRTUAL_KEYBOARD.md",
+    "wooting-analog-virtual-control",
+    "wooting-analog-virtual-control.exe",
+}
+
+
 REQUIRED_PATHS = {
     "darwin_arm64": [
         "includes/wooting-analog-sdk.h",
@@ -196,7 +204,7 @@ def copy_platform_tree(platform: str, extracted_root: Path, target_dir: Path) ->
 
     copied = []
     for source in source_root.iterdir():
-        if source.name == "__MACOSX":
+        if source.name == "__MACOSX" or source.name in EXCLUDED_TOP_LEVEL_ASSETS:
             continue
         target = target_dir / source.name
         if source.is_dir():
@@ -246,17 +254,16 @@ def fix_macos_install_names(platform: str, target_dir: Path) -> None:
         print("Warning: install_name_tool not available; macOS dylib IDs were not rewritten")
         return
 
-    for binary_dir in (target_dir / "release", target_dir / "debug"):
-        for dylib in binary_dir.glob("libwooting_analog_sdk_dist.dylib"):
-            subprocess.run(
-                [
-                    install_name_tool,
-                    "-id",
-                    "@rpath/libwooting_analog_sdk_dist.dylib",
-                    str(dylib),
-                ],
-                check=True,
-            )
+    for dylib in (target_dir / "release").glob("libwooting_analog_sdk_dist.dylib"):
+        subprocess.run(
+            [
+                install_name_tool,
+                "-id",
+                "@rpath/libwooting_analog_sdk_dist.dylib",
+                str(dylib),
+            ],
+            check=True,
+        )
 
 
 def write_manifest(version: str, copied: dict[str, list[str]]) -> None:

@@ -58,19 +58,41 @@ Running SDK updates locally
    python scripts/update_wooting_sdk.py --version 0.9.1
    git status --short
 
-The script: - downloads GitHub release assets for macOS arm64/x86_64,
-Linux, and Windows - verifies SHA256 (release metadata or
-``KNOWN_SHA256`` fallback) - extracts archives and replaces target
-platform directories - updates ``tachywooting/libraries/VERSION.json`` -
-adjusts macOS install names for dylibs when needed
+The script:
+
+- downloads GitHub release assets for macOS arm64/x86_64, Linux, and Windows;
+- verifies SHA256 digests from release metadata or the ``KNOWN_SHA256``
+  fallback;
+- extracts archives and replaces target platform directories;
+- removes SDK assets that are not shipped with the Python package;
+- updates ``tachywooting/libraries/VERSION.json``;
+- adjusts macOS release-library install names for dylibs when needed.
+
+Excluded SDK assets
+~~~~~~~~~~~~~~~~~~~
+
+TachyWooting vendors only the SDK pieces needed for normal package installs and
+CFFI builds. The updater intentionally excludes:
+
+- ``debug/`` SDK libraries;
+- ``VIRTUAL_KEYBOARD.md``;
+- ``wooting-analog-virtual-control``;
+- ``wooting-analog-virtual-control.exe``.
+
+Those assets support Wooting SDK development and virtual-keyboard testing, but
+they are not required to use TachyWooting with a real keyboard. Keeping them out
+of the repository and PyPI package keeps ``pip install tachywooting`` small and
+consistent across platforms. If a maintainer needs to test the Wooting virtual
+keyboard locally, download the official Wooting SDK release assets into a local
+scratch directory instead of vendoring them in this package.
 
 SDK update best practices
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - Always inspect ``git diff tachywooting/libraries`` before commit.
-- Ensure required Linux artifacts still exist in:
-- ``tachywooting/libraries/linux/release``
-- ``tachywooting/libraries/linux/debug``
+- Ensure required release artifacts still exist, especially
+  ``tachywooting/libraries/linux/release`` for CI Linux builds.
+- Ensure excluded SDK assets did not come back after an update.
 - Do not remove binaries required by the CFFI build.
 
 3) Running workflows locally with ``act``

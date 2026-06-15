@@ -69,6 +69,15 @@ tachywooting = [
     "permissions/**/*",
 ]
 
+
+[tool.setuptools.exclude-package-data]
+tachywooting = [
+    "libraries/**/debug/*",
+    "libraries/**/VIRTUAL_KEYBOARD.md",
+    "libraries/**/wooting-analog-virtual-control",
+    "libraries/**/wooting-analog-virtual-control.exe",
+]
+
 [project.scripts]
 wooting-demo = "tachywooting.demos.cli:main"
 wooting-build-interface = "tachywooting.package_setup:run_post_install"

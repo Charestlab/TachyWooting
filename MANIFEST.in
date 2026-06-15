@@ -6,4 +6,8 @@ recursive-include tests *.py
 exclude tachywooting/interface/wooting_interface*
 prune build
 prune dist
+prune tachywooting/libraries/*/*/debug
+prune tachywooting/libraries/*/debug
 global-exclude __pycache__ *.py[cod] .DS_Store
+global-exclude wooting-analog-virtual-control wooting-analog-virtual-control.exe
+global-exclude VIRTUAL_KEYBOARD.md
