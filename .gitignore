@@ -33,8 +33,7 @@ _build/
 *.pyd
 
 # Keep vendored Linux SDK binaries tracked for packaging/CI builds
-!wooting_package/libraries/linux/release/*.so
-!wooting_package/libraries/linux/debug/*.so
+!tachywooting/libraries/linux/release/*.so
 
 # Python package/build artifacts
 build/
@@ -76,8 +75,8 @@ ENV/
 
 # Generated CFFI interface artifacts.
 # Keep the package marker, but ignore native files produced on each machine.
-wooting_package/interface/*
-!wooting_package/interface/__init__.py
+tachywooting/interface/*
+!tachywooting/interface/__init__.py
 
 # Local acquisition/logging outputs
 *.h5
