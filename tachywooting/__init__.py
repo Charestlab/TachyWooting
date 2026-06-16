@@ -23,7 +23,7 @@ except PackageNotFoundError:
 # with `wooting-build-interface` so imports stay safe in tests, docs, and CI.
 from .interface import lib, ffi
 from .wooting_interface_builder import build_interface
-from .wooting_utils import WOOTING_ACQUISITION, convert_char_to_keycode, load_trial, trial_to_dataframe, load_session
+from .wooting_utils import WOOTING_ACQUISITION, convert_char_to_keycode, convert_keycode_to_char, load_trial, trial_to_dataframe, load_session
 from .package_setup import delete_interface
 
 __all__ = [
@@ -31,6 +31,7 @@ __all__ = [
     "__version__",
     "build_interface",
     "convert_char_to_keycode",
+    "convert_keycode_to_char",
     "delete_interface",
     "lib",
     "ffi",

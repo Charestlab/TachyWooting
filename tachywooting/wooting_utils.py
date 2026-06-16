@@ -131,7 +131,7 @@ def convert_char_to_keycode(input_values) -> list | None:
         ['0', 39, 1, 1],
         ['-', 45, 1, 1],
         ['=', 46, 1, 1],
-        ['<-', 42, 1, 1],
+        ['Backspace', 42, 1, 1],
         ['Ins', 73, 1, 1],
         ['Hme', 74, 1, 1],
         ['PgUp', 75, 1, 1],
@@ -187,7 +187,7 @@ def convert_char_to_keycode(input_values) -> list | None:
         ['B', 5, 1, 1],
         ['N', 17, 1, 1],
         ['M', 16, 1, 1],
-        ['', 54, 1, 1],
+        [',', 54, 1, 1],
         ['.', 55, 1, 1],
         ['/', 56, 1, 1],
         ['Shift', 229, 3, 1],
@@ -247,6 +247,30 @@ def convert_char_to_keycode(input_values) -> list | None:
             return None
 
     return converted
+
+
+def convert_keycode_to_char(keycode: int) -> str | None:
+    """Convert a HID keycode to its lowercase key label.
+
+    Parameters
+    ----------
+    keycode : int
+        HID keycode (e.g. 29 for Z).
+
+    Returns
+    -------
+    str or None
+        Lowercase key label (e.g. ``"z"``), or ``None`` if not found.
+
+    Examples
+    --------
+    >>> convert_keycode_to_char(29)
+    "z"
+    """
+    result = convert_char_to_keycode(keycode)
+    if result is None:
+        return None
+    return str(result[0]).lower()
 
 
 # ============================================================
@@ -934,6 +958,26 @@ class WOOTING_ACQUISITION:
 
         raise TypeError("target_keys must be a list of all strings or all integers")
 
+    def _warn_invalid_keycodes(self, target_codes: Sequence[int]) -> None:
+        """Warn if any target keycode is not present on the connected Wooting device.
+
+        Uses a raw ``read_analog`` probe at initialization time. The SDK returns
+        ``WootingAnalogResult_NoMapping`` for keycodes that have no physical key
+        on the device (e.g. asking for F1 on a 3-key UwU keyboard).
+        """
+        if not self.initialized:
+            return
+        no_mapping = int(lib.WootingAnalogResult_NoMapping)
+        for code in target_codes:
+            raw = float(lib.wooting_analog_read_analog(int(code)))
+            if int(raw) == no_mapping:
+                label = convert_keycode_to_char(code) or str(code)
+                _log.warning(
+                    "Keycode %d (%r) is not mapped on the connected Wooting device — "
+                    "it will never register a press.",
+                    code, label,
+                )
+
     def _ensure_target_cache(self, target_codes: Sequence[int]) -> Tuple[Tuple[int, ...], Set[int]]:
         tgt_tuple = tuple(int(c) for c in target_codes)
         if self._target_codes_cache != tgt_tuple:
@@ -1098,40 +1142,28 @@ class WOOTING_ACQUISITION:
     def get_response_key(
         self,
         hier: Dict[str, Dict[str, Dict[str, Any]]],
-        target_keys: Sequence[Union[str, int]],
-        trial_index: Optional[int] = None,
-    ) -> int:
-        """Return the keycode of the target key that was pressed in the last acquired trial.
-
-        Pass the ``hier`` dict returned by :meth:`acquire_analog_values` or
-        :meth:`acquire_integer_values`. The key with the highest peak position
-        in that trial is returned — in a standard yes/no response where only one
-        key is pressed, this uniquely identifies the response.
+    ) -> tuple:
+        """Return (keycode, rt) of the first key to cross the threshold.
 
         Parameters
         ----------
         hier : dict
-            Acquisition output from ``acquire_analog_values`` or
-            ``acquire_integer_values``.
-        target_keys : sequence of str or int
-            The same keys that were passed to the acquire call.
-        trial_index : int, optional
-            Trial index to look up in ``hier``. Defaults to ``self.trial - 1``,
-            which is correct when called immediately after acquisition.
+            Acquisition output from :meth:`acquire_analog_values` or :meth:`acquire_integer_values`.
 
         Returns
         -------
-        int
-            Keycode of the key with the highest peak position.
+        tuple[int | None, float]
+            ``(keycode, rt)`` — keycode as int, rt in seconds from trial onset.
+            Returns ``(None, nan)`` if no key crossed the threshold.
         """
-        t = str(self.trial - 1 if trial_index is None else trial_index)
-        target_codes = self._to_keycodes(target_keys)
-        return max(
-            target_codes,
-            key=lambda c: np.asarray(
-                hier.get(t, {}).get(str(c), {}).get("position", [0.0])
-            ).max(),
-        )
+        t = str(self.trial - 1)
+
+        attrs = hier.get(t, {}).get("_attrs", {})
+        key = attrs.get("threshold_key")
+        rt = attrs.get("threshold_time")
+        if key is not None and rt is not None:
+            return int(key), float(rt)
+        return None, float("nan")
 
     def _record_trial_removal_status(self, trial_index: int, had_removal: bool) -> None:
         self.total_trials += 1
@@ -1488,6 +1520,8 @@ class WOOTING_ACQUISITION:
                 "Use acquire_integer_values instead."
             )
 
+        self._warn_invalid_keycodes(self._to_keycodes(list(target_keys)))
+
         result = self._acquire_raw_values(
             target_keys=target_keys,
             duration_after_threshold=duration_after_threshold,
@@ -1584,6 +1618,8 @@ class WOOTING_ACQUISITION:
                 "Use acquire_analog_values instead."
             )
 
+        self._warn_invalid_keycodes(self._to_keycodes(list(target_keys)))
+
         result = self._acquire_raw_values(
             target_keys=target_keys,
             duration_after_threshold=duration_after_threshold,
@@ -1675,6 +1711,7 @@ class WOOTING_ACQUISITION:
 
         # --- resolve keycodes ---
         target_codes = self._to_keycodes(target_keys)
+        self._warn_invalid_keycodes(target_codes)
 
         # >>> quit key resolution
         quit_codes = self._to_keycodes([quit_key]) if quit_key is not None else []
