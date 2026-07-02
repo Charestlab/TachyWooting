@@ -341,6 +341,8 @@ def _write_trial_file(
 
             g_keys = g_trial.require_group("keys")
             for k_str, serie in keys.items():
+                if k_str == "_attrs":
+                    continue
                 g_key = g_keys.require_group(f"{int(k_str):04d}")
 
                 data = np.asarray(
@@ -1141,14 +1143,27 @@ class WOOTING_ACQUISITION:
 
     def get_response_key(
         self,
-        hier: Dict[str, Dict[str, Dict[str, Any]]],
+        hier: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None,
     ) -> tuple:
         """Return (keycode, rt) of the first key to cross the threshold.
 
+        Prefers ``threshold_key``/``threshold_time`` from
+        ``hier[trial]["_attrs"]``. The live ``hier`` returned directly by
+        :meth:`acquire_analog_values` / :meth:`acquire_integer_values`
+        carries this ``"_attrs"`` entry (mirroring the same metadata
+        persisted as HDF5 trial attributes -- see :func:`_write_trial_file`
+        -- so this also matches a trial dict reloaded via :func:`load_trial`).
+        Falls back to the threshold crossing tracked internally during the
+        most recently completed acquisition call when ``hier`` is omitted or
+        does not carry ``"_attrs"`` (e.g. an older or hand-built ``hier``).
+
         Parameters
         ----------
-        hier : dict
-            Acquisition output from :meth:`acquire_analog_values` or :meth:`acquire_integer_values`.
+        hier : dict, optional
+            Acquisition output from :meth:`acquire_analog_values` or
+            :meth:`acquire_integer_values`, or a trial dict from
+            :func:`load_trial`. May be omitted to read only the internally
+            tracked state.
 
         Returns
         -------
@@ -1156,11 +1171,17 @@ class WOOTING_ACQUISITION:
             ``(keycode, rt)`` — keycode as int, rt in seconds from trial onset.
             Returns ``(None, nan)`` if no key crossed the threshold.
         """
-        t = str(self.trial - 1)
+        key = rt = None
+        if hier:
+            t = str(self.trial - 1)
+            attrs = hier.get(t, {}).get("_attrs", {})
+            key = attrs.get("threshold_key")
+            rt = attrs.get("threshold_time")
 
-        attrs = hier.get(t, {}).get("_attrs", {})
-        key = attrs.get("threshold_key")
-        rt = attrs.get("threshold_time")
+        if key is None or rt is None:
+            key = self._last_threshold_key
+            rt = self._last_threshold_time
+
         if key is not None and rt is not None:
             return int(key), float(rt)
         return None, float("nan")
@@ -1402,6 +1423,16 @@ class WOOTING_ACQUISITION:
         hier = self._finalize_bins_to_hier(bins)
         self._pending_trial_had_removal = bool(trial_had_removal)
 
+        # Mirror the HDF5 trial attributes metadata
+        hier.setdefault(str(self.trial), {})["_attrs"] = {
+            "backend": getattr(self, "last_backend", ""),
+            "trial_start_perf_ns": int(trial_start_perf_ns),
+            "trial_start_clock": str(trial_start_clock),
+            "threshold": float(self.threshold),
+            "threshold_time": self._last_threshold_time,
+            "threshold_key": self._last_threshold_key,
+        }
+
         if quit_code is not None:
             return hier, bool(quit_pressed)
         return hier
@@ -1640,7 +1671,9 @@ class WOOTING_ACQUISITION:
 
         # Quantize positions to int in [0, 255]
         for _, keys in hier.items():
-            for _, serie in keys.items():
+            for key_name, serie in keys.items():
+                if key_name == "_attrs":
+                    continue
                 serie["position"] = np.rint(
                     np.asarray(serie["position"], dtype=np.float64) * 255.0
                 ).astype(np.int16)
